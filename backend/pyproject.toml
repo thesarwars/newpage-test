@@ -1,0 +1,92 @@
+[project]
+name = "cia-backend"
+version = "0.1.0"
+description = "Career Intelligence Assistant — RAG over a resume and job descriptions"
+requires-python = ">=3.12,<3.13"
+
+# Floors only. Exact versions live in uv.lock — see CLAUDE.md.
+dependencies = [
+    "django>=5.2,<6.0",
+    "djangorestframework>=3.16,<4.0",
+    "django-cors-headers>=4.7",
+    "django-environ>=0.12",
+    "psycopg[binary]>=3.2",
+    "pgvector>=0.4",
+    "structlog>=25.1",
+    "gunicorn>=23.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-django>=4.10",
+    "pytest-cov>=6.0",
+    "ruff>=0.9",
+    "mypy>=1.15",
+    "django-stubs[compatible-mypy]>=5.1",
+    "djangorestframework-stubs>=3.15",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "C4", "DJ", "T20", "RUF"]
+# DJ001: null=True on CharField is deliberate where a DB-level NULL is meaningful.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"*/migrations/*" = ["E501", "N806", "RUF012"]
+# No blanket ignore for config/settings/*: the star import is deliberate in
+# exactly three files and each carries its own `# noqa: F403`, which is the
+# local, greppable form. A directory-wide ignore would also silence F405 on
+# genuine typos in settings names.
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+# --strict is applied to the packages that carry the logic, not to Django glue.
+# See docs/PLAN.md §11.
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_reexport = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = ["apps.rag.*", "apps.documents.*", "apps.analysis.*", "apps.chat.*", "llm.*"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+disallow_any_generics = true
+warn_return_any = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["*.migrations.*"]
+ignore_errors = true
+
+# Third-party packages that ship no py.typed marker. Listed explicitly rather
+# than globally disabling missing-import errors, so a genuinely mistyped import
+# still fails.
+[[tool.mypy.overrides]]
+module = ["environ.*"]
+ignore_missing_imports = true
+
+[tool.django-stubs]
+django_settings_module = "config.settings.test"
+
+[tool.pytest.ini_options]
+# --ds, not the DJANGO_SETTINGS_MODULE ini key. pytest-django resolves the
+# settings module as: --ds > DJANGO_SETTINGS_MODULE env var > ini key. The
+# container and CI both export that env var pointing at dev settings, so the ini
+# key loses and the suite would run against dev — live LLM backend included.
+# Caught by tests/test_smoke.py, which is why that assertion exists.
+python_files = ["test_*.py"]
+testpaths = ["tests"]
+addopts = "-q --strict-markers --ds=config.settings.test"
+
+[tool.coverage.run]
+source = ["apps", "llm"]
+omit = ["*/migrations/*", "*/tests/*"]

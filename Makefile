@@ -1,0 +1,64 @@
+# Every target execs inside the container. Host Python is 3.14, where onnxruntime
+# (the embedder, M3) has no wheels — running pytest on the host is not a supported
+# path and this Makefile is the only documented entry point. docs/PLAN.md §14.
+
+COMPOSE := docker compose
+API     := $(COMPOSE) exec -T api
+WEB     := $(COMPOSE) exec -T web
+
+.DEFAULT_GOAL := help
+.PHONY: help up down build logs migrate makemigrations shell test test-web lint fmt typecheck clean
+
+help: ## Show this help
+	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+
+up: ## Build, start, migrate, and print the URL
+	@test -f .env || cp .env.example .env
+	$(COMPOSE) up -d --build
+	@echo "waiting for api…" && $(COMPOSE) exec -T api sh -c 'until curl -fsS http://localhost:8000/healthz >/dev/null 2>&1; do sleep 1; done' || true
+	-$(API) python manage.py migrate --noinput
+	@echo ""
+	@echo "  web  →  http://localhost:3000"
+	@echo "  api  →  http://localhost:8000/healthz"
+	@echo ""
+
+down: ## Stop and remove containers (keeps the database volume)
+	$(COMPOSE) down
+
+build: ## Build all images
+	$(COMPOSE) build
+
+logs: ## Tail logs
+	$(COMPOSE) logs -f --tail=100
+
+migrate: ## Apply migrations
+	$(API) python manage.py migrate --noinput
+
+makemigrations: ## Generate migrations
+	$(API) python manage.py makemigrations
+
+shell: ## Django shell
+	$(COMPOSE) exec api python manage.py shell
+
+test: ## Backend suite (no network, no API key)
+	$(API) pytest
+
+lint: ## ruff + mypy
+	$(API) ruff check .
+	$(API) ruff format --check .
+	$(API) mypy .
+
+fmt: ## Autoformat
+	$(API) ruff format .
+	$(API) ruff check --fix .
+
+typecheck: ## Frontend types
+	$(WEB) pnpm typecheck
+
+test-web: ## Frontend lint + types + build
+	$(WEB) pnpm lint
+	$(WEB) pnpm typecheck
+	$(WEB) pnpm build
+
+clean: ## Remove containers AND the database volume
+	$(COMPOSE) down -v

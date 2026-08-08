@@ -1,0 +1,10 @@
+node_modules/
+.next/
+out/
+dist/
+.env
+.env.*
+npm-debug.log*
+.DS_Store
+playwright-report/
+test-results/

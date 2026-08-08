@@ -1,0 +1,76 @@
+name: cia
+
+# Three services, and the README says why there isn't a fourth: no broker (ingest
+# is bounded and synchronous), no separate vector database (pgvector lives in the
+# same Postgres, so retrieval is one query plan and one transaction), no metrics
+# stack. See docs/PLAN.md §2.
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cia}
+      POSTGRES_USER: ${POSTGRES_USER:-cia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cia}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # Published on a non-default host port on purpose: anyone with a local
+      # Postgres already owns 5432, and `make up` failing on a port collision is
+      # a terrible first thirty seconds. Override with POSTGRES_PORT_HOST.
+      # Nothing in the app needs this — it is for psql from the host.
+      - "${POSTGRES_PORT_HOST:-55432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cia} -d ${POSTGRES_DB:-cia}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ./backend
+      target: dev
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      POSTGRES_HOST: db
+      DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.dev}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      # Bind-mounted for reload during development. The prod stage COPYs instead.
+      - ./backend:/app
+      - media:/app/media
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  web:
+    build:
+      context: ./frontend
+      target: dev
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/api/v1}
+      WATCHPACK_POLLING: "true"
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      # Anonymous volumes: keep the image's node_modules and .next rather than
+      # letting the host bind-mount shadow them with a macOS-built tree.
+      - /app/node_modules
+      - /app/.next
+
+volumes:
+  pgdata:
+  media:
