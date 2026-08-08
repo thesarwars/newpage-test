@@ -17,4 +17,5 @@ urlpatterns = [
     path("readyz", health.readyz, name="readyz"),
     path("version", health.version, name="version"),
     path("api/v1/", include("apps.core.urls")),
+    path("api/v1/", include("apps.documents.urls")),
 ]

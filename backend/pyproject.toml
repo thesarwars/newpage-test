@@ -14,6 +14,11 @@ dependencies = [
     "pgvector>=0.4",
     "structlog>=25.1",
     "gunicorn>=23.0",
+    # pdfplumber over pypdf/pypdfium2: it exposes per-character `size` and
+    # `non_stroking_color`, which is how white-on-white and 0pt injected text is
+    # detected (apps/documents/sanitize.py). Slower, and irrelevant at <=30 pages.
+    "pdfplumber>=0.11",
+    "python-docx>=1.1",
 ]
 
 [dependency-groups]
@@ -21,6 +26,13 @@ dev = [
     "pytest>=8.3",
     "pytest-django>=4.10",
     "pytest-cov>=6.0",
+    # Property tests for the offset invariant — the one contract the whole
+    # citation feature rests on. Handwritten examples do not find the
+    # counterexamples that matter here.
+    "hypothesis>=6.125",
+    # Fixture *generation*, so the committed demo PDFs are reproducible from a
+    # script rather than binaries of unknown provenance.
+    "reportlab>=4.2",
     "ruff>=0.9",
     "mypy>=1.15",
     "django-stubs[compatible-mypy]>=5.1",
@@ -42,6 +54,16 @@ ignore = ["E501"]
 # declarative config block, not mutable shared state, and annotating it breaks
 # Django's own introspection — a false positive scoped to where it occurs.
 "*/models.py" = ["RUF012"]
+# RUF001 flags "ambiguous" Unicode (en dash, full-width Latin, hyphen bullet).
+# In these four modules that Unicode *is the subject matter*: normalize.py folds
+# it, sections.py matches on it, sanitize.py hunts it, and the tests assert on
+# it. Replacing the characters with ASCII would delete the behaviour under test.
+"apps/documents/normalize.py" = ["RUF001"]
+"apps/documents/chunking/sections.py" = ["RUF001"]
+"apps/documents/sanitize.py" = ["RUF001"]
+"tests/unit/test_normalize.py" = ["RUF001"]
+# Fixture generation is a CLI script; printing what it wrote is the interface.
+"scripts/*" = ["T201"]
 # No blanket ignore for config/settings/*: the star import is deliberate in
 # exactly three files and each carries its own `# noqa: F403`, which is the
 # local, greppable form. A directory-wide ignore would also silence F405 on
@@ -75,7 +97,7 @@ ignore_errors = true
 # than globally disabling missing-import errors, so a genuinely mistyped import
 # still fails.
 [[tool.mypy.overrides]]
-module = ["environ.*", "fastembed.*"]
+module = ["environ.*", "fastembed.*", "reportlab.*"]
 ignore_missing_imports = true
 
 [tool.django-stubs]
