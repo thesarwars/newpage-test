@@ -57,6 +57,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
+        with:
+          # `defaults.run.working-directory` applies only to `run:` steps, never
+          # to `uses:` actions — so this action looks for package.json at the
+          # repo root, finds nothing, and fails with "No pnpm version is
+          # specified" even though frontend/package.json pins packageManager.
+          package_json_file: frontend/package.json
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -80,6 +86,13 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The gitleaks *action* derives a commit range from the push event. On the
+      # first push that range is `<first-commit>^..<head>`, whose left side is
+      # not a revision, so it errored — after reporting "no leaks found in
+      # partial scan" having scanned ~0 bytes. A gate that passes by scanning
+      # nothing is worse than one that fails, so this runs the tool directly and
+      # scans the full history every time.
+      - name: gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:latest \
+            git /repo --redact --no-banner
