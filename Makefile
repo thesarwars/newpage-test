@@ -7,7 +7,7 @@ API     := $(COMPOSE) exec -T api
 WEB     := $(COMPOSE) exec -T web
 
 .DEFAULT_GOAL := help
-.PHONY: help up down build logs migrate makemigrations shell test test-web lint fmt typecheck clean
+.PHONY: help up down build logs migrate makemigrations shell test test-web eval eval-baseline lint fmt typecheck clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -46,6 +46,12 @@ shell: ## Django shell
 
 test: ## Backend suite (no network, no API key)
 	$(API) pytest
+
+eval: ## Retrieval evaluation against the golden set (no API key needed)
+	$(API) python manage.py run_eval
+
+eval-baseline: ## Re-run the eval and commit the numbers as the new baseline
+	$(API) python manage.py run_eval --write-baseline
 
 lint: ## ruff + mypy
 	$(API) ruff check .

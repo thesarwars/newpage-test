@@ -70,6 +70,16 @@ jobs:
         run: uv run mypy .
       - name: pytest
         run: uv run pytest --cov --cov-report=term-missing
+      # Retrieval quality as a build gate, not a README claim. Thresholds sit
+      # just below the committed baseline in backend/evals/baseline.json, so a
+      # change that degrades retrieval fails here rather than being discovered
+      # by a user. Needs no API key — every metric is deterministic.
+      - name: eval gate
+        run: |
+          uv run python manage.py migrate --noinput
+          uv run python manage.py run_eval \
+            --fail-under-hit-rate 0.95 \
+            --fail-under-routing 1.0
 
   frontend:
     runs-on: ubuntu-latest

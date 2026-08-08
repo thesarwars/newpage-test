@@ -23,6 +23,7 @@ import structlog
 from django.contrib.postgres.search import SearchVector
 from django.db import transaction
 
+from apps.analysis.services import extract_requirements, refresh_all_jobs
 from apps.core.logging import log_safe
 from apps.core.models import Session
 from apps.documents.chunking.breadcrumb import apply as apply_breadcrumb
@@ -204,10 +205,30 @@ def _persist(
         injection_findings=findings,
     )
 
+    # Requirements are extracted at ingest, not on demand. Query expansion (M4)
+    # and the Gap Matrix both read these rows, and the deterministic extractor
+    # needs no key — so a job description is fully analysable the moment it
+    # finishes uploading, with or without an API key.
+    requirements = (
+        extract_requirements(
+            document=document,
+            normalized_text=normalized.text,
+            detected_sections=detected_sections,
+        )
+        if kind == DocumentKind.JOB
+        else []
+    )
+
+    if kind == DocumentKind.RESUME:
+        # Upload order is the user's choice. Someone who adds three postings and
+        # then their CV must not be left with three empty Fit cards.
+        refresh_all_jobs(resume=document)
+
     log.info(
         "document_ingested",
         sections=len(sections),
         chunks=len(chunks),
+        requirements=len(requirements),
         injection_flag=findings.flagged,
         injection_reasons=findings.reasons,
         **log_safe(document),

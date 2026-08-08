@@ -11,9 +11,10 @@ Next.js 16 · Claude Opus 5.
 > ### 🚧 Build status — in progress
 >
 > This README documents **what actually works today**, not the finished product.
-> Four of fourteen planned milestones are complete: the backend ingest and
-> indexing pipeline is real and tested; retrieval, chat and the entire frontend
-> are not built yet. [What's built](#whats-built-today) is exact about the line.
+> Five of fourteen planned milestones are complete: ingest, indexing and
+> retrieval are real, tested and measured. Chat generation and the entire
+> frontend are not built yet — [What's built](#whats-built-today) is exact about
+> the line.
 >
 > The full design — including every decision below and the ones not yet
 > implemented — is in **[docs/PLAN.md](docs/PLAN.md)**.
@@ -45,8 +46,8 @@ api  →  http://localhost:8000/readyz
 
 `ANTHROPIC_API_KEY` is the **only** key this project ever asks for, and it is not
 required. Everything currently built runs without it — parsing, normalization,
-chunking, embedding, indexing and retrieval are all local. Set it in `.env` when
-generation lands in M5.
+chunking, embedding, retrieval, requirement extraction and gap analysis are all
+local. Set it in `.env` when generation lands in M5.
 
 ### Useful targets
 
@@ -54,6 +55,7 @@ generation lands in M5.
 |---|---|
 | `make up` | Build, start, migrate, print URLs |
 | `make test` | Backend suite — no network, no API key |
+| `make eval` | Retrieval evaluation against the golden set |
 | `make lint` | ruff, ruff format, mypy |
 | `make down` / `make clean` | Stop / stop and drop the database volume |
 | `make logs` | Tail structured logs |
@@ -74,10 +76,36 @@ Complete and tested:
 | **M1** Ops spine | Anonymous session tenancy, structured logging with PII redaction, error envelope, `/healthz` `/readyz` `/version` |
 | **M2** Ingest | Upload validation, PDF/DOCX/text parsers, text normalization, section detection, prompt-injection scanning |
 | **M3** Chunking & embeddings | Structure-aware chunking on the model's real tokenizer, structural breadcrumbs, local ONNX embeddings, HNSW + GIN indexes |
+| **M4** Retrieval & evaluation | Hybrid dense + lexical retrieval with RRF, per-job quotas, section anchors, an evidence floor, deterministic scope resolution and intent routing, keyless requirement extraction, and a golden-set eval gating CI |
 
-Not built yet: hybrid retrieval and the evaluation harness (M4), the LLM gateway
-and streaming chat with citations (M5), and the entire frontend (M6+). The
-`web` container currently serves the default Next.js page.
+Not built yet: the LLM gateway and streaming chat with citations (M5), and the
+entire frontend (M6+). The `web` container currently serves the default Next.js
+page.
+
+### Retrieval quality, measured
+
+`make eval` runs 32 golden questions against the demo corpus. **No API key
+required** — every metric is deterministic.
+
+| arm | hit-rate@12 | MRR@12 |
+|---|---|---|
+| dense only | 1.000 | 0.337 |
+| lexical only | 0.833 | 0.640 |
+| **RRF fused** | **1.000** | **0.497** |
+
+That table is the justification for hybrid retrieval, and it is why the lexical
+arm keeps its GIN index. Dense finds the right chunk every time but ranks it
+poorly; lexical misses more often but ranks precisely when it hits. Fusion keeps
+dense's recall and most of lexical's precision.
+
+Scope resolution ("Job #2" → the right document) and out-of-scope refusal are
+both **1.000**. Gap analysis scores **F1 0.875** against hand labels versus
+**0.482** for a naive top-k baseline — the delta is the evidence for the claim
+that *vector search cannot retrieve absence*: the chunks most similar to "what
+am I missing?" are the ones describing what the candidate has.
+
+CI fails the build if fused hit-rate drops below 0.95 or routing below 1.000.
+The committed numbers live in `backend/evals/baseline.json`.
 
 ### Try what exists
 
@@ -180,14 +208,16 @@ compose build, and secret scanning over complete git history.
 
 ### Testing
 
-**156 tests**, no network and no API key required.
+**218 tests**, no network and no API key required.
 
 | Area | Tests |
 |---|---|
 | Injection scanning | 28 |
 | Document API (incl. cross-tenant probes) | 27 |
+| Retrieval: fusion, quotas, anchors, floor, routing | 40 |
 | Chunking, offsets, tokenizer | 24 |
 | Section detection | 21 |
+| Requirement extraction & matching | 15 |
 | Parsers & upload validation | 15 |
 | Sessions | 11 |
 | Normalization (property-based) | 10 |
@@ -259,11 +289,15 @@ than papered over.
 
 ## What I'd do differently / next
 
-Immediate, in order: hybrid retrieval with a measured ablation (dense vs lexical
-vs fused), then the evaluation harness — a hand-written golden question set with
-CI gates on hit-rate and citation validity, so retrieval quality is a number
-rather than an assertion. Then the LLM gateway with a single call site and a cost
-ledger, and streaming chat with native citations.
+Immediate: the LLM gateway with a single call site and a cost ledger, then
+streaming chat with native citations, then the frontend.
+
+**The golden set is the weakest part of the evaluation** and I would replace it
+first. Thirty-two questions drafted alongside the implementation measure
+*regression*, not quality — they are not adversarial, and they were written by
+someone who knew how the retriever worked. Independently authored questions,
+including negations and deliberately ambiguous references, would be worth more
+than any amount of further tuning.
 
 The image is currently **2.2 GB** (onnxruntime plus baked weights). That's a real
 cost to a reviewer's first `make up` and I haven't attacked it yet.

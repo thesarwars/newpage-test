@@ -1,0 +1,29 @@
+{
+  "retrieval": {
+    "dense": {
+      "hit_rate_at_12": 1.0,
+      "mrr_at_12": 0.3374,
+      "items": 24
+    },
+    "lexical": {
+      "hit_rate_at_12": 0.8333,
+      "mrr_at_12": 0.6417,
+      "items": 24
+    },
+    "fused": {
+      "hit_rate_at_12": 1.0,
+      "mrr_at_12": 0.5,
+      "items": 24
+    }
+  },
+  "routing_accuracy": 1.0,
+  "refusal_precision": 1.0,
+  "gap": {
+    "labelled_items": 3,
+    "structured_precision": 0.7778,
+    "structured_recall": 1.0,
+    "structured_f1": 0.8745,
+    "naive_topk_f1": 0.4824
+  },
+  "golden_items": 32
+}

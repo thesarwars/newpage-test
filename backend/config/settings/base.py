@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     "apps.core",
     "apps.documents",
     "apps.rag",
+    "apps.analysis",
 ]
 
 MIDDLEWARE = [
