@@ -99,6 +99,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      # compose now *requires* POSTGRES_PASSWORD, which means even `build` needs
+      # a .env. Generating it with the same target a reviewer runs means this job
+      # also exercises the generation path rather than working around it.
+      - name: generate .env
+        run: make .env
       - name: build all images
         run: docker compose build
 
