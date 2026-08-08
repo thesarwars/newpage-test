@@ -394,7 +394,11 @@ A résumé is PII by construction, and the design treats it that way rather than
 bolting on a policy afterwards.
 
 - **No third-party analytics, no session replay, no CDN fonts.** The only
-  external egress is `api.anthropic.com`, and only once generation lands.
+  external egress at runtime is `api.anthropic.com`, and only when a key is set.
+  That claim needed defending rather than asserting: Next.js collects anonymous
+  telemetry and posts it to Vercel **by default**, so `NEXT_TELEMETRY_DISABLED`
+  is set in the image, in compose and in CI. An app holding somebody's résumé
+  does not get to phone home about itself, even anonymously.
 - **Logs carry ids and content hashes, never document text.** A `log_safe()`
   helper is the only sanctioned way to reference a document in a log — it
   physically cannot emit text because it never receives it — and a redaction

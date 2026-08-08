@@ -83,6 +83,11 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    env:
+      # `pnpm build` posts anonymous telemetry to Vercel otherwise, and the
+      # README claims api.anthropic.com is the only external egress this project
+      # has. CI is where that claim is cheapest to keep true.
+      NEXT_TELEMETRY_DISABLED: "1"
     defaults:
       run:
         working-directory: frontend
