@@ -15,7 +15,7 @@ from rest_framework.response import Response
 from apps.core.errors import ApiError, NotFoundError, SessionRequiredError
 from apps.core.models import Session
 from apps.documents.ingest import ingest_text, ingest_upload
-from apps.documents.models import Document, DocumentKind, Section
+from apps.documents.models import Document, DocumentKind, Section, rail_order
 from apps.documents.validators import MAX_FILE_BYTES
 
 log = structlog.get_logger(__name__)
@@ -96,7 +96,7 @@ def documents(request: Request) -> Response:
     session = _current(request)
 
     if request.method == "GET":
-        queryset = Document.objects.for_session(session).prefetch_related("sections")
+        queryset = rail_order(Document.objects.for_session(session).prefetch_related("sections"))
         return Response({"documents": [_serialize(doc) for doc in queryset]})
 
     upload = request.FILES.get("file")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from django.core import signing
 from rest_framework.test import APIClient
@@ -33,3 +35,14 @@ def authenticate(client: APIClient, session: Session) -> APIClient:
 @pytest.fixture
 def session_client(client: APIClient, session: Session) -> APIClient:
     return authenticate(client, session)
+
+
+def drain(response: Any) -> str:
+    """Read a streaming response to completion and return its body.
+
+    Not a convenience. A `StreamingHttpResponse` runs its generator only when the
+    content is consumed, so a test that merely asserts on the status code
+    exercises none of the endpoint: it gets a 200 and no rows are written
+    anywhere. Every test that POSTs to a streaming endpoint goes through here.
+    """
+    return b"".join(response.streaming_content).decode("utf-8")

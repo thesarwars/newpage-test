@@ -50,7 +50,13 @@ def test_current_session_returns_usage(session_client: APIClient, session: Sessi
     body = session_client.get("/api/v1/sessions/current/").json()
 
     assert body["id"] == str(session.id)
-    assert body["usage"] == {"tokens_used": 0, "cost_usd": "0.000000"}
+    assert body["usage"] == {
+        "tokens_used": 0,
+        "cost_usd": "0.000000",
+        # The budget meter reads this rather than computing it client-side, so a
+        # fresh session already reports the full daily ceiling as available.
+        "budget_remaining_usd": "10.000000",
+    }
 
 
 def test_cost_is_serialized_identically_on_create_and_read(client: APIClient) -> None:

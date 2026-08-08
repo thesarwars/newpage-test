@@ -7,7 +7,7 @@ API     := $(COMPOSE) exec -T api
 WEB     := $(COMPOSE) exec -T web
 
 .DEFAULT_GOAL := help
-.PHONY: help up down build logs migrate makemigrations shell test test-web eval eval-baseline smoke-live smoke-sse lint fmt typecheck clean
+.PHONY: help up down build logs migrate makemigrations shell seed test test-web eval eval-baseline smoke-live smoke-sse lint fmt typecheck clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -43,6 +43,9 @@ makemigrations: ## Generate migrations
 
 shell: ## Django shell
 	$(COMPOSE) exec api python manage.py shell
+
+seed: ## Ingest the demo resume + 3 job descriptions into a fresh session
+	$(API) python manage.py seed_demo
 
 test: ## Backend suite (no network, no API key)
 	$(API) pytest

@@ -27,6 +27,7 @@ from apps.observability.models import LLMCall
 from llm import backends, budget
 from llm.fake import FakeAnthropic
 from llm.gateway import UpstreamError
+from tests.conftest import drain
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "anthropic"
 
@@ -71,7 +72,7 @@ NICE TO HAVE
 
 def parse_sse(response: Any) -> list[tuple[str, dict[str, Any]]]:
     """Collect `(event, data)` pairs. Also asserts the framing is well-formed."""
-    body = b"".join(response.streaming_content).decode("utf-8")
+    body = drain(response)
     events: list[tuple[str, dict[str, Any]]] = []
     for frame in body.split("\n\n"):
         frame = frame.strip()

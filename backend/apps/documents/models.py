@@ -200,6 +200,29 @@ class Chunk(SessionScopedModel):
         return f"{self.document_id}#{self.ordinal} [{self.char_start}:{self.char_end}]"
 
 
+def rail_order(queryset: models.QuerySet[Document]) -> models.QuerySet[Document]:
+    """Résumé first, then jobs by ordinal — the order the document rail renders.
+
+    `Meta.ordering` is `(kind, ordinal)`, which sorts *alphabetically*: "job"
+    precedes "resume", so the default puts the postings above the CV. That is
+    fine for the eval and wrong for the UI, and the two must not disagree — a
+    freshly seeded workspace and a reloaded one returning the same four
+    documents in different orders is the kind of inconsistency that reads as a
+    rendering bug.
+
+    Ordering lives here rather than in the client so that every consumer —
+    hydration, the document list, the demo response — agrees by construction.
+    """
+    return queryset.order_by(
+        models.Case(
+            models.When(kind=DocumentKind.RESUME, then=models.Value(0)),
+            default=models.Value(1),
+            output_field=models.PositiveSmallIntegerField(),
+        ),
+        "ordinal",
+    )
+
+
 def next_ordinal(session: Session, kind: str) -> int:
     """Next free ordinal for a kind within a session.
 
