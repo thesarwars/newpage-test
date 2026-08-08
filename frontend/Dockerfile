@@ -24,17 +24,15 @@ FROM deps AS dev
 # bind-mounted source so a macOS-built tree cannot shadow the Linux one. The
 # reinstall it triggers then aborts — it wants to delete a directory and there is
 # no TTY to confirm — and the dev server never starts.
-# pnpm 11 verifies node_modules against the lockfile before every script run and
-# reinstalls on a mismatch. Here node_modules is an anonymous volume that
-# `docker compose up --force-recreate` deliberately REUSES, so it can outlive the
-# image it was seeded from — add a dependency inside a running container and the
-# volume records a store path the rebuilt image no longer uses. pnpm then tries
-# to purge, asks for confirmation, finds no TTY, and aborts, so the dev server
-# never starts and the error names none of this.
+# If this container ever fails to start with
+# ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY, the cause is the node_modules
+# volume rather than anything in the image: `docker compose up --force-recreate`
+# deliberately REUSES anonymous volumes, so one can outlive the image it was
+# seeded from. Add a dependency inside a running container and the volume then
+# records a store path the rebuilt image no longer uses; pnpm tries to purge it,
+# asks for confirmation, finds no TTY, and aborts. The error names none of that.
 #
-# `--renew-anon-volumes` is the cure for an already-diverged volume;
-# `confirm-modules-purge false` lets the container heal itself instead of dying.
-RUN pnpm config set --global confirm-modules-purge false
+# The cure is `docker compose up -d --force-recreate --renew-anon-volumes web`.
 COPY . .
 EXPOSE 3000
 CMD ["pnpm", "dev"]

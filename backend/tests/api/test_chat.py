@@ -250,8 +250,7 @@ class TestStream:
             at = citation["answer_char"]
             assert at > 0
             assert answer[at - 1] == "”", (
-                f"answer_char {at} should sit just past a closing quote, "
-                f"found {answer[at - 1]!r}"
+                f"answer_char {at} should sit just past a closing quote, found {answer[at - 1]!r}"
             )
 
     def test_answer_char_offsets_land_inside_the_answer(
