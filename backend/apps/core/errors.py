@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Any
 
 import structlog
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, RequestDataTooBig
 from django.http import Http404
 from rest_framework import status
 from rest_framework.response import Response
@@ -91,6 +91,19 @@ def exception_handler(exc: Exception, context: dict[str, Any]) -> Response | Non
     if isinstance(exc, Http404):
         return Response(NotFoundError().to_payload(), status=status.HTTP_404_NOT_FOUND)
 
+    # Raised by Django while *reading* the body, before any view runs, so no
+    # endpoint can catch it locally. Without this it renders as a bare 500.
+    if isinstance(exc, RequestDataTooBig):
+        return Response(
+            ApiError(
+                "That request body is too large to accept.",
+                error_code="payload_too_large",
+                hint="Paste a shorter document, or upload it as a file instead.",
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            ).to_payload(),
+            status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        )
+
     if isinstance(exc, PermissionDenied):
         return Response(
             ApiError(
@@ -129,6 +142,17 @@ def exception_handler(exc: Exception, context: dict[str, Any]) -> Response | Non
         code = "rate_limited"
 
     payload: dict[str, Any] = {"error_code": code, "message": message}
+
+    # DRF's ParseError carries a Python diagnostic — "JSON parse error -
+    # Expecting property name enclosed in double quotes: line 1 column 2
+    # (char 1)". True, useless to the person reading it, and a client bug rather
+    # than a user one. This module exists so that user-facing copy is written
+    # here; that includes the failures nobody designed for.
+    if message.startswith("JSON parse error"):
+        payload["error_code"] = "malformed_request"
+        payload["message"] = "Something went wrong sending that request."
+        payload["hint"] = "Try again. If it keeps happening, reload the page."
+        log.warning("malformed_request_body", detail=message)
     if isinstance(detail, dict) and "detail" not in detail:
         payload["fields"] = detail
     if retry_after := drf_response.get("Retry-After"):

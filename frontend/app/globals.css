@@ -1,26 +1,232 @@
 @import "tailwindcss";
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Dark mode
+
+   Tailwind 4's `dark:` variant defaults to `@media (prefers-color-scheme: dark)`
+   and ignores both a class and a data attribute. next-themes writes
+   `data-theme="dark"` on <html> by default (NOT class="dark" — its README's
+   Tailwind section is v3-era). Without this line the toggle silently does
+   nothing while the OS preference keeps winning, and nothing errors.
+
+   Both selectors are matched so switching `attribute="class"` later does not
+   quietly break every dark: utility in the app.
+   ───────────────────────────────────────────────────────────────────────────── */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *, .dark, .dark *));
+
+@theme {
+  /* ── Type ──────────────────────────────────────────────────────────────────
+     A closed scale: 12/13/14/16/20/26/34 (docs/PLAN.md §7). `--text-*: initial`
+     drops Tailwind's default text-xs..text-9xl so the scale is actually closed
+     rather than merely preferred — a stray `text-lg` fails to compile instead
+     of silently introducing a ninth size. */
+  --text-*: initial;
+  --text-micro: 0.75rem;   /* 12 — trace payloads, chip meta */
+  --text-meta: 0.8125rem;  /* 13 — labels, captions, tier text */
+  --text-body: 0.875rem;   /* 14 — body, the default */
+  --text-lead: 1rem;       /* 16 — emphasised body */
+  --text-title: 1.25rem;   /* 20 — card titles */
+  --text-section: 1.625rem;/* 26 — section headings */
+  --text-hero: 2.125rem;   /* 34 — fit scores */
+
+  --text-body--line-height: 1.55;
+  --text-lead--line-height: 1.5;
+  --text-title--line-height: 1.3;
+  --text-section--line-height: 1.15;
+  --text-section--letter-spacing: -0.02em;
+  --text-hero--line-height: 1.15;
+  --text-hero--letter-spacing: -0.02em;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+
+  /* ── Radius ─────────────────────────────────────────────────────────────── */
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-pill: 999px;
+
+  /* ── Motion ─────────────────────────────────────────────────────────────────
+     Tailwind 4.3 has no `--duration-*` theme namespace — `duration-panel` does
+     not compile. These are plain custom properties, consumed as
+     `duration-(--duration-panel)`, which does. */
+  --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-panel: cubic-bezier(0.32, 0.72, 0, 1);
+  --duration-hover: 150ms;
+  --duration-panel: 220ms;
+  --duration-meter: 600ms;
+  --stagger-chip: 40ms;
+
+  /* ── Colour ─────────────────────────────────────────────────────────────────
+     Declared as `--color-*` so Tailwind generates bg-/text-/border-/ring-
+     utilities, and pointed at plain custom properties so the *value* can be
+     re-declared per theme below. A literal here would bake light mode into the
+     generated utility and dark mode would have nothing to override. */
+  --color-surface: var(--surface);
+  --color-card: var(--card);
+  --color-muted: var(--muted);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-inv: var(--ink-inv);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-fill: var(--accent-fill);
+  --color-mark: var(--mark);
+  --color-strong: var(--strong);
+  --color-partial: var(--partial);
+  --color-weak: var(--weak);
+  --color-gap: var(--gap);
+
+  /* Exactly one elevation level (docs/PLAN.md §7). */
+  --shadow-raised: 0 1px 2px 0 oklch(0% 0 0 / 0.06);
+}
+
+/* ── Light ───────────────────────────────────────────────────────────────────
+   The default. Every token has a value here, so a missing dark override
+   degrades to a readable light value rather than to `unset`. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --surface: oklch(99.08% 0.0013 106.42);        /* #fcfcfb */
+  --card: oklch(100% 0 0);                       /* #ffffff */
+  --muted: oklch(95.78% 0.0054 95.10);           /* #f2f1ed */
+  --hairline: oklch(91.55% 0.0055 95.10);        /* #e4e3df — decorative edges */
+  --hairline-strong: oklch(66.20% 0.0058 106.56);/* #93938f — form controls, 3:1 */
+  --ink: oklch(14.96% 0 0);                      /* #0b0b0b  19.17:1 */
+  --ink-2: oklch(43.49% 0.0050 91.51);           /* #52514e   7.73:1 */
+  --ink-inv: oklch(100% 0 0);
+
+  /* Three accents, because one cannot do all three jobs at AA.
+     accent      #2a78d6 — focus rings and borders only (4.30:1, non-text)
+     accent-ink  #2674d2 — link and button *text*        (4.53:1)
+     accent-fill #2876d4 — solid fill under white text   (4.53:1) */
+  --accent: oklch(57.53% 0.1626 255.53);
+  --accent-ink: oklch(56.28% 0.1629 255.69);
+  --accent-fill: oklch(56.90% 0.1627 255.61);
+  --mark: oklch(90.85% 0.0393 253.01);           /* #cfe3fb, ink on it 15.03:1 */
+
+  /* Fit tiers — themed, against docs/PLAN.md §7's "never themed". See
+     docs/adr/0011. Measured against the page (#fcfcfb), the worst case in light:
+     3.47 / 4.29 / 5.64 / 8.16. Hue is never text; the label and the score are
+     ink, and the icon is a filled shape so the 3:1 it clears is what is seen. */
+  --strong: oklch(60.62% 0.2048 142.58);         /* #039e05  3.47:1 */
+  --partial: oklch(57.76% 0.1204 78.08);         /* #a06f00  4.29:1 */
+  --weak: oklch(52.28% 0.1411 41.46);            /* #aa471c  5.64:1 */
+  --gap: oklch(44.45% 0.1803 25.27);             /* #a00016  8.16:1 */
+
+  color-scheme: light;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ── Dark ────────────────────────────────────────────────────────────────────
+   Authored, not inverted. Status ratios are measured against the raised card
+   (#232321) rather than the page, because the card is the lighter surface and
+   therefore the worst case in dark — computing against the page overstates
+   safety by roughly half a point. */
+[data-theme="dark"],
+.dark {
+  --surface: oklch(21.74% 0.0019 106.56);        /* #1a1a19 */
+  --card: oklch(25.54% 0.0037 106.66);           /* #232321 */
+  --muted: oklch(26.75% 0.0054 106.76);          /* #262623 */
+  --hairline: oklch(31.97% 0.0069 106.79);       /* #33332f */
+  --hairline-strong: oklch(53.32% 0.0077 106.66);/* #6d6d68 */
+  --ink: oklch(100% 0 0);                        /* #ffffff  17.42:1 */
+  --ink-2: oklch(81.18% 0.0152 102.51);          /* #c3c2b7   9.72:1 */
+  --ink-inv: oklch(14.96% 0 0);
+
+  --accent: oklch(62.21% 0.1612 255.05);         /* #3987e5 */
+  --accent-ink: oklch(63.20% 0.1622 255.17);     /* #3c8ae9  4.50:1 on card */
+  --accent-fill: oklch(57.03% 0.1606 254.87);    /* #2777d3, white 4.50:1 */
+  --mark: oklch(32.06% 0.0582 254.20);           /* #1d3450 */
+
+  --strong: oklch(55.75% 0.1897 142.50);         /* #008d00  3.61:1 */
+  --partial: oklch(68.40% 0.1421 78.90);         /* #c88d00  5.45:1 */
+  --weak: oklch(77.20% 0.1383 41.81);            /* #fe956c  7.29:1 */
+  --gap: oklch(83.48% 0.0912 24.98);             /* #ffb2ab  9.15:1 */
+
+  /* Dark elevation is a raised surface and a border, with no shadow. It must be
+     `0 0 #0000`, not `none`: Tailwind composes box-shadow from a comma-separated
+     list of variables, and `none` inside such a list is invalid CSS that
+     silently kills the whole declaration. */
+  --shadow-raised: 0 0 #0000;
+
+  color-scheme: dark;
 }
 
+/* System preference, as a fallback only.
+
+   Guarded so it never overrides an explicit choice: if the user has picked
+   Light while their OS is dark, `[data-theme="light"]` is present and this must
+   not fire. It exists for the pre-hydration frame and for JS-disabled readers,
+   which is exactly when `prefers-color-scheme` is the only signal available. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  :root:not([data-theme]):not(.light):not(.dark) {
+    --surface: oklch(21.74% 0.0019 106.56);
+    --card: oklch(25.54% 0.0037 106.66);
+    --muted: oklch(26.75% 0.0054 106.76);
+    --hairline: oklch(31.97% 0.0069 106.79);
+    --hairline-strong: oklch(53.32% 0.0077 106.66);
+    --ink: oklch(100% 0 0);
+    --ink-2: oklch(81.18% 0.0152 102.51);
+    --ink-inv: oklch(14.96% 0 0);
+    --accent: oklch(62.21% 0.1612 255.05);
+    --accent-ink: oklch(63.20% 0.1622 255.17);
+    --accent-fill: oklch(57.03% 0.1606 254.87);
+    --mark: oklch(32.06% 0.0582 254.20);
+    --strong: oklch(55.75% 0.1897 142.50);
+    --partial: oklch(68.40% 0.1421 78.90);
+    --weak: oklch(77.20% 0.1383 41.81);
+    --gap: oklch(83.48% 0.0912 24.98);
+    --shadow-raised: 0 0 #0000;
+    color-scheme: dark;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  html {
+    /* Next 16 no longer overrides smooth scrolling during SPA navigation, so
+       this attribute is what keeps route changes snappy while the evidence
+       panel's scrollIntoView still animates. */
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Scores animate. Proportional digits change width as they count up, which
+     makes the number jitter; tabular ones do not. */
+  .tabular,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One focus treatment, on everything focusable, at 2px offset. Applied here
+     rather than per component so a new control cannot forget it. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: var(--color-mark);
+    color: var(--color-ink);
+  }
+}
+
+/* Everything collapses to instant. Not "faster" — off. A vestibular trigger is
+   not improved by being brief. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

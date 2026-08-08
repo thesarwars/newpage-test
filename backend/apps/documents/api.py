@@ -80,6 +80,10 @@ def _serialize(document: Document, *, include_text: bool = False) -> dict[str, A
         "error_code": document.error_code,
         "injection_flag": document.injection_flag,
         "injection_reasons": document.injection_reasons,
+        # Promised by docs/PLAN.md §6 and absent until now. The rail renders it
+        # ("ready · 14"), and it is the cheapest available signal that indexing
+        # actually happened rather than merely reporting that it did.
+        "chunk_count": document.chunks.count(),
         "sections": [_serialize_section(s) for s in document.sections.all()],
         "created_at": document.created_at.isoformat(),
     }

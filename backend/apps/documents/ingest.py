@@ -322,6 +322,24 @@ def _overlaps_any(start: int, end: int, spans: list[tuple[int, int]]) -> bool:
 
 
 def _enforce_session_quota(session: Session, kind: str) -> None:
+    """Quota check and ordinal allocation, serialized per session.
+
+    Both this count and `next_ordinal`'s MAX are read-then-write, and both race
+    with a concurrent upload into the same session: two requests read the same
+    ordinal, and the second violates `unique(session, kind, ordinal)` with an
+    IntegrityError the user sees as a 500. Six parallel uploads produced one 201
+    and five 500s.
+
+    A row lock on the session is the smallest fix that is actually correct.
+    Serializing uploads within one session costs nothing — a person adds
+    documents one at a time — while a unique-constraint retry loop would be more
+    code for a case that only arises from a double-click.
+    """
+    # Locks the session row for the rest of the enclosing transaction, which is
+    # `_persist`'s @transaction.atomic. Concurrent uploads for *different*
+    # sessions are unaffected.
+    Session.objects.select_for_update().get(pk=session.pk)
+
     existing = Document.objects.for_session(session).filter(kind=kind).count()
     if kind == DocumentKind.RESUME and existing >= 1:
         raise ResumeAlreadyExistsError()

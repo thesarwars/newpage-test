@@ -27,6 +27,13 @@ MIN_EXTRACTED_CHARS = 200
 # whether there is enough to analyse. A terse but real job blurb is ~150 chars,
 # and telling its author "this looks like a scan" would be nonsense.
 MIN_PASTED_CHARS = 50
+# And an upper bound, which the paste path did not have. Ingest is synchronous,
+# so an unbounded paste is unbounded request time: 200 KB measured at 20 s and
+# 500 KB at 51 s, and behind gunicorn's 30 s default those are 502s rather than
+# slow successes. 30 pages of dense prose is roughly 120k characters, so this is
+# the same ceiling the file path enforces via MAX_PAGES, expressed in the unit
+# the paste path actually has.
+MAX_PASTED_CHARS = 120_000
 # A DOCX is a zip. A 200x compression ratio is not a résumé, it is a zip bomb
 # aimed at whatever unpacks it.
 MAX_ZIP_RATIO = 200
@@ -95,6 +102,12 @@ class TextTooShortError(UploadError):
     error_code = "text_too_short"
     message = "There isn't enough text there to analyse."
     hint = "Paste the whole posting, including the requirements section."
+
+
+class TextTooLongError(UploadError):
+    error_code = "text_too_long"
+    message = "That's more text than this build will analyse in one document."
+    hint = "Paste the role and its requirements, or split it across two documents."
 
 
 class ZipBombError(UploadError):
@@ -182,6 +195,8 @@ def validate_pasted_text(text: str) -> None:
     """
     if len(text.strip()) < MIN_PASTED_CHARS:
         raise TextTooShortError()
+    if len(text) > MAX_PASTED_CHARS:
+        raise TextTooLongError()
 
 
 def safe_stored_name(session_id: str, document_id: str, extension: str) -> str:

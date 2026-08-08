@@ -121,6 +121,15 @@ REST_FRAMEWORK = {
     },
 }
 
+# Django rejects a larger body before the view runs, which surfaced as a bare
+# 500 with no error_code. Sized just above MAX_PASTED_CHARS (120k chars, up to
+# 4 bytes each under UTF-8) plus JSON overhead, so the limit a user actually
+# meets is the documented one with a real message — not this backstop.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
+# The multipart path is bounded separately by MAX_FILE_BYTES (10 MB), checked in
+# validate_upload with its own error_code.
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024 + 1024
+
 CORS_ALLOWED_ORIGINS = env("CORS_ALLOWED_ORIGINS")
 CORS_ALLOW_CREDENTIALS = True
 
