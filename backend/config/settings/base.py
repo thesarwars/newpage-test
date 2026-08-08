@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "corsheaders",
+    "apps.core",
 ]
 
 MIDDLEWARE = [
@@ -41,6 +42,10 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # Outermost of ours: everything downstream logs with the correlation id
+    # already bound, including the session resolution below it.
+    "apps.core.middleware.RequestIdMiddleware",
+    "apps.core.middleware.SessionCookieMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -92,9 +97,12 @@ MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
+    # No auth classes and no user: the tenant is the signed session cookie,
+    # resolved by SessionCookieMiddleware. See apps/core/models.py.
     "DEFAULT_AUTHENTICATION_CLASSES": [],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
     "UNAUTHENTICATED_USER": None,
+    "EXCEPTION_HANDLER": "apps.core.errors.exception_handler",
 }
 
 CORS_ALLOWED_ORIGINS = env("CORS_ALLOWED_ORIGINS")
@@ -108,11 +116,14 @@ LLM_DAILY_COST_CEILING_USD = env("LLM_DAILY_COST_CEILING_USD")
 EMBEDDING_BACKEND = env("EMBEDDING_BACKEND", default="local")
 EMBEDDING_MODEL = env("EMBEDDING_MODEL", default="BAAI/bge-small-en-v1.5")
 
-# Structured JSON logs to stdout. The processor chain that scrubs PII lands in M1
-# (docs/PLAN.md §10) — this is the plain scaffold it replaces.
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "handlers": {"console": {"class": "logging.StreamHandler"}},
-    "root": {"handlers": ["console"], "level": "INFO"},
-}
+# Structured logs to stdout, with PII redaction on by default. Configured here
+# rather than in AppConfig.ready() so logging is live before the app registry
+# finishes loading — startup failures are logs too.
+#
+# LOG_FORMAT is explicit rather than derived from DEBUG: leaf settings modules
+# override DEBUG after importing this file, so a derived renderer would ignore
+# them. See config/logging.py.
+from config.logging import configure_structlog  # noqa: E402
+
+LOG_FORMAT = env("LOG_FORMAT", default="console" if DEBUG else "json")
+LOGGING = configure_structlog(fmt=LOG_FORMAT)

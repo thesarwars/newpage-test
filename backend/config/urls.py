@@ -1,25 +1,20 @@
 """Root URL configuration.
 
-M0 carries a bare liveness probe so `docker compose up` is verifiable end to end.
-M1 replaces it with the real ops spine in `apps/core` (`/healthz`, `/readyz`,
-`/version`) — see docs/PLAN.md §13.
+Ops endpoints sit at the root, unversioned: a load balancer health check should
+not have to know about `/api/v1`, and these three never change shape.
+Everything else is versioned from the first commit — adding `/v2` later is
+cheap, retrofitting a version prefix onto a shipped client is not.
 """
 
 from django.contrib import admin
-from django.http import HttpRequest, JsonResponse
-from django.urls import path
+from django.urls import include, path
 
-
-def healthz(_request: HttpRequest) -> JsonResponse:
-    """Liveness only — deliberately touches no dependency.
-
-    A liveness probe that checks the database turns a slow query into a restart
-    storm. Dependency checks belong in /readyz (M1).
-    """
-    return JsonResponse({"status": "ok"})
-
+from apps.core import health
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("healthz", healthz, name="healthz"),
+    path("healthz", health.healthz, name="healthz"),
+    path("readyz", health.readyz, name="readyz"),
+    path("version", health.version, name="version"),
+    path("api/v1/", include("apps.core.urls")),
 ]

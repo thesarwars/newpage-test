@@ -37,7 +37,11 @@ select = ["E", "F", "I", "N", "UP", "B", "C4", "DJ", "T20", "RUF"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
-"*/migrations/*" = ["E501", "N806", "RUF012"]
+"*/migrations/*" = ["E501", "N806", "RUF012", "I001"]
+# RUF012 wants ClassVar on mutable class attributes. Django's inner `Meta` is a
+# declarative config block, not mutable shared state, and annotating it breaks
+# Django's own introspection — a false positive scoped to where it occurs.
+"*/models.py" = ["RUF012"]
 # No blanket ignore for config/settings/*: the star import is deliberate in
 # exactly three files and each carries its own `# noqa: F403`, which is the
 # local, greppable form. A directory-wide ignore would also silence F405 on
@@ -71,7 +75,7 @@ ignore_errors = true
 # than globally disabling missing-import errors, so a genuinely mistyped import
 # still fails.
 [[tool.mypy.overrides]]
-module = ["environ.*"]
+module = ["environ.*", "fastembed.*"]
 ignore_missing_imports = true
 
 [tool.django-stubs]
