@@ -399,6 +399,12 @@ bolting on a policy afterwards.
   telemetry and posts it to Vercel **by default**, so `NEXT_TELEMETRY_DISABLED`
   is set in the image, in compose and in CI. An app holding somebody's résumé
   does not get to phone home about itself, even anonymously.
+- **The uploaded file is never written to disk.** It is validated, parsed and
+  normalized in memory, and the original bytes are dropped — nothing downstream
+  needs them, because every offset in the system indexes into `normalized_text`
+  rather than into the source file. A test enumerates every model in the project
+  and asserts none carries a `FileField`, so this stays true by build failure
+  rather than by vigilance.
 - **Logs carry ids and content hashes, never document text.** A `log_safe()`
   helper is the only sanctioned way to reference a document in a log — it
   physically cannot emit text because it never receives it — and a redaction

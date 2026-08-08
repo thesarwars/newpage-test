@@ -47,7 +47,6 @@ services:
     volumes:
       # Bind-mounted for reload during development. The prod stage COPYs instead.
       - ./backend:/app
-      - media:/app/media
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/healthz || exit 1"]
       interval: 5s
@@ -79,4 +78,3 @@ services:
 
 volumes:
   pgdata:
-  media:

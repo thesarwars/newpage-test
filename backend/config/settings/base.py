@@ -99,8 +99,9 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-MEDIA_URL = "media/"
-MEDIA_ROOT = BASE_DIR / "media"
+# No MEDIA_ROOT: nothing in this project writes a user file to disk. Uploads are
+# parsed in memory and only the normalized text is stored. See
+# apps/documents/models.py.
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

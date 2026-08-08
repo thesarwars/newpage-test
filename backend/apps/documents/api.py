@@ -185,8 +185,7 @@ def _delete(document: Document) -> Response:
     kind = document.kind
     document_id = str(document.id)
 
-    if document.file:
-        document.file.delete(save=False)
+    # No blob to unlink: the upload is never written to disk (see models.py).
     document.delete()
 
     _renumber(session, kind)

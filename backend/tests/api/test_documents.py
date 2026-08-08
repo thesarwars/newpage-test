@@ -317,3 +317,39 @@ def test_display_label_falls_back_to_job_number(session_client: APIClient) -> No
 
 def test_resume_display_label(session_client: APIClient) -> None:
     assert paste(session_client, kind=DocumentKind.RESUME).json()["label"] == "Résumé"
+
+
+@pytest.mark.django_db
+def test_no_model_in_this_project_stores_an_uploaded_file(session_client: APIClient) -> None:
+    """The privacy claim, asserted structurally rather than described in prose.
+
+    A résumé is PII by construction, and the strongest version of "we delete
+    your data" is never writing it down. Uploads are validated, parsed and
+    normalized in memory; only `normalized_text` is persisted, because every
+    offset in the system indexes into that rather than into the source bytes.
+
+    Enumerating every model rather than checking one field, because the failure
+    this guards against is someone adding a FileField *later* — at which point
+    the README's claim becomes false with nothing to notice it. It also caught
+    the original problem: `Document.file` was declared and the plan described
+    UUID-named blobs on a volume, and nothing ever wrote to either.
+    """
+    from django.apps import apps as django_apps
+    from django.conf import settings
+    from django.db import models as django_models
+
+    paste(session_client, text=JOB_TEXT, kind="job")
+
+    offenders = [
+        f"{model._meta.label}.{field.name}"
+        for model in django_apps.get_models()
+        if model._meta.app_label
+        in {"core", "documents", "rag", "analysis", "chat", "observability"}
+        for field in model._meta.get_fields()
+        if isinstance(field, django_models.FileField)
+    ]
+    assert offenders == [], f"these would put user files on disk: {offenders}"
+
+    # Django's global_settings always defines MEDIA_ROOT, so its presence proves
+    # nothing — its emptiness is the assertion. Nothing has a place to write to.
+    assert not settings.MEDIA_ROOT

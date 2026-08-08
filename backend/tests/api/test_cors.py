@@ -19,9 +19,7 @@ WEB_ORIGIN = "http://localhost:3000"
 
 @pytest.mark.django_db
 class TestPreflight:
-    def test_credentialed_preflight_is_allowed_from_the_web_origin(
-        self, client: APIClient
-    ) -> None:
+    def test_credentialed_preflight_is_allowed_from_the_web_origin(self, client: APIClient) -> None:
         response = client.options(
             "/api/v1/sessions/demo/",
             HTTP_ORIGIN=WEB_ORIGIN,

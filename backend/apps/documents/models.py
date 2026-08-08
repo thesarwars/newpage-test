@@ -50,8 +50,20 @@ class Document(SessionScopedModel):
     label = models.CharField(max_length=200, blank=True)
     company = models.CharField(max_length=200, blank=True)
 
+    # The name, for display. Not the bytes.
+    #
+    # There is deliberately no FileField here. The upload is validated, parsed
+    # and normalized in memory, and the original bytes are then dropped —
+    # nothing downstream needs them, because every offset in the system indexes
+    # into `normalized_text` rather than into the source file.
+    #
+    # An earlier draft carried `file = FileField(upload_to="documents/")` and
+    # the plan described UUID-named blobs on a volume. Nothing ever wrote to it.
+    # That is worse than either alternative: a column a future reader assumes
+    # holds a résumé, a delete path maintained for files that do not exist, and
+    # a privacy claim about storage that does not happen. Removed, and the
+    # honest claim is the stronger one — the file is never written to disk.
     original_filename = models.CharField(max_length=255, blank=True)
-    file = models.FileField(upload_to="documents/", blank=True, null=True)
     mime_type = models.CharField(max_length=100, blank=True)
     size_bytes = models.PositiveIntegerField(default=0)
     page_count = models.PositiveSmallIntegerField(default=0)
