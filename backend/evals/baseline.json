@@ -7,12 +7,12 @@
     },
     "lexical": {
       "hit_rate_at_12": 0.8333,
-      "mrr_at_12": 0.6403,
+      "mrr_at_12": 0.6194,
       "items": 24
     },
     "fused": {
       "hit_rate_at_12": 1.0,
-      "mrr_at_12": 0.4966,
+      "mrr_at_12": 0.5487,
       "items": 24
     }
   },
@@ -20,9 +20,9 @@
   "refusal_precision": 1.0,
   "gap": {
     "labelled_items": 3,
-    "structured_precision": 0.7778,
+    "structured_precision": 0.9444,
     "structured_recall": 1.0,
-    "structured_f1": 0.8745,
+    "structured_f1": 0.9697,
     "naive_topk_f1": 0.4824
   },
   "golden_items": 32

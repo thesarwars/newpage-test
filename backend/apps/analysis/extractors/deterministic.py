@@ -114,6 +114,22 @@ _KNOWN_SKILLS: tuple[str, ...] = tuple(
 )
 _KNOWN_SKILL_SET = frozenset(_KNOWN_SKILLS)
 
+
+def is_curated(skill: str) -> bool:
+    """Whether this skill name came from the vocabulary rather than a guess.
+
+    The distinction matters wherever a skill is shown to a user. A curated hit
+    ("kubernetes") is a named technology; a fallback hit ("backend services") is
+    a noun phrase lifted out of prose, which is good enough to index on and not
+    good enough to build a sentence around.
+    """
+    from apps.rag.aliases import normalize_skill
+
+    return skill in _KNOWN_SKILL_SET or any(
+        normalize_skill(known) == skill for known in _KNOWN_SKILLS
+    )
+
+
 # A bullet shorter than this is a fragment — only applied when no known skill
 # was recognised in it.
 _MIN_BULLET_CHARS = 12
@@ -190,10 +206,30 @@ def _bullet_spans(text: str, section: Section) -> list[tuple[int, int]]:
 def _primary_skill(text: str) -> str:
     """The skill a requirement is about.
 
-    Longest known skill wins, so "google cloud" beats "cloud" and "distributed
-    systems" beats neither word alone. Falls back to a leading noun phrase so a
-    requirement about something not in the vocabulary still produces a row —
-    a missing requirement is worse than an imprecisely-named one.
+    Longest known skill wins, so "google cloud platform" beats "cloud" and
+    "distributed systems" beats neither word alone. Falls back to a leading noun
+    phrase so a requirement about something not in the vocabulary still produces
+    a row — a missing requirement is worse than an imprecisely-named one.
+
+    **Known limitation, measured rather than assumed.** Longest-match names
+    "Solid PostgreSQL, including schema design and query tuning" as
+    `schema design`, because that phrase is three characters longer than
+    `postgresql`. The row is then judged against the résumé under the wrong
+    name, which can invent a gap the candidate does not have.
+
+    Ranking by earliest position instead fixes that case and breaks two worse
+    ones: "Strong Python, with production PyTorch experience" resolves to
+    `python` (which the résumé has, so a real PyTorch gap disappears), and
+    "an ML orchestration framework such as Kubeflow" resolves to
+    `machine learning`. Measured on the eval, position-first moved gap recall
+    from 1.000 to 0.867 — it loses more than it wins.
+
+    Neither ordering is right, because the distinction is specificity rather
+    than position or length: `postgresql` is a named technology and
+    `schema design` is a generic activity, and nothing in a flat vocabulary
+    encodes that. Fixing it properly means weighting the vocabulary, which is
+    the LLM extractor's job in M8 — this is the deterministic floor, and its
+    floor is honest about where it sits.
     """
     lowered = text.lower()
     for candidate in _KNOWN_SKILLS:
@@ -208,10 +244,17 @@ def _primary_skill(text: str) -> str:
 _LEAD_FILLER = re.compile(
     r"^\W*(?:\d+\+?\s*years?\s*)?(?:of|in|with|and|or|to|a|an|the|experience|exposure|"
     r"familiarity|strong|solid|proven|deep|demonstrable|hands[\s-]?on|understanding|"
-    r"knowledge|background|working|production|expertise|comfortable|ability)\b\W*",
+    r"knowledge|background|working|production|expertise|comfortable|ability|"
+    r"building|owning|managing)\b\W*",
     re.I,
 )
 _TRAILING_CONJUNCTION = re.compile(r"\b(?:or|and|with|for|to|in|of)$", re.I)
+# An *internal* conjunction ends the skill name rather than joining it. "6+ years
+# in backend or platform engineering" is a requirement about backend; taking the
+# first three words produced "backend or platform", which is not a skill, does
+# not match anything in a résumé, and is rendered verbatim in the Gap Matrix and
+# in the suggestion chips.
+_INTERNAL_CONJUNCTION = frozenset({"or", "and", "&", "/"})
 _STOPWORD_ONLY = re.compile(r"^(?:\w{1,2}|and|or|the|with|for|from)$", re.I)
 
 
@@ -231,7 +274,21 @@ def _fallback_skill(lowered: str) -> str:
             break
         trimmed = stripped
 
-    words = [w for w in re.split(r"[\s,;:.]+", trimmed) if w][:3]
+    # Cut at the first clause boundary before taking words. "Experience with
+    # distributed training: data and model parallelism" is about distributed
+    # training; spanning the colon produced "distributed training data".
+    trimmed = re.split(r"[:;.(]", trimmed, maxsplit=1)[0]
+
+    words: list[str] = []
+    for word in re.split(r"[\s,]+", trimmed):
+        if not word:
+            continue
+        if word in _INTERNAL_CONJUNCTION:
+            break
+        words.append(word)
+        if len(words) == 3:
+            break
+
     while words and _TRAILING_CONJUNCTION.fullmatch(words[-1]):
         words.pop()
 
