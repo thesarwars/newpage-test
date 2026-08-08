@@ -39,7 +39,14 @@ _BULLET_LINE_RE = re.compile(rf"^[ \t]*[{re.escape(_BULLETS)}][ \t]+", re.MULTIL
 # "Kuber-\nnetes" -> "Kubernetes". Only when the fragment before the break is
 # lowercase and the continuation is lowercase: "Full-\nStack" is a real hyphen
 # at a line break, and "AWS-\nnative" would be mangled by a greedy rule.
-_LINE_WRAP_HYPHEN_RE = re.compile(r"([a-z])-\n([a-z])")
+#
+# `[ \t]*` before the newline is not cosmetic. Without it the rule misses
+# "a- \nb" on the first pass, trailing-space stripping (step 5) then turns that
+# into "a-\nb", and a *second* pass joins it — so normalize(normalize(x)) !=
+# normalize(x). Hypothesis found exactly that, with the three-character input
+# "a- \na". Idempotence is what lets every offset in the system be taken on
+# trust, so this is not a cosmetic rule either.
+_LINE_WRAP_HYPHEN_RE = re.compile(r"([a-z])-[ \t]*\n([a-z])")
 
 _TRAILING_SPACE_RE = re.compile(r"[ \t]+$", re.MULTILINE)
 _EXCESS_BLANK_LINES_RE = re.compile(r"\n{3,}")

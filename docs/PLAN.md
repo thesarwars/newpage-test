@@ -285,6 +285,16 @@ This is **model-native attribution**, not "please cite as [1]" prompt-begging, w
 
 **M5 spike, 30 minutes, before any streaming code:** hit the real API once with a two-block document request, record the response as `tests/fixtures/anthropic/citations_stream.json`, and confirm `char_location` shape. Documented fallback if it resists: server-numbered `[S1]` markers + a regex mapper (~20 lines, worse UX, half a day saved).
 
+> **⚠ Divergence, M5 — the spike did not run.** No `ANTHROPIC_API_KEY` was available at any point during this build, so the one step this plan sequences *first* could not be performed. Rather than skip it silently:
+>
+> - `llm/gateway.py::_parse_event` encodes the **documented** `citations_delta` / `char_location` shape, not an observed one. It is the only contract in the repository that is asserted rather than measured, and it says so in its own docstring.
+> - The parser is written defensively (`getattr` throughout), so a field-name mismatch costs the citation marks, never the answer or the request.
+> - `tests/fixtures/anthropic/raw_stream_events.json` pins that assumption, with a `_warning` field and a README explaining that the test passes *because* fixture and parser share any error.
+> - `make smoke-live` is the spike, as a one-command script. It sends the two-block request, prints the raw events, and — the part that matters — verifies `block_text[start:end] == cited_text` for every citation returned, exiting non-zero if it fails. `--write-fixture` re-records the fixture, at which point `tests/unit/test_gateway.py` turns red if the real shape and the documented one disagree.
+> - Everything downstream of the parser *is* verified: the offset arithmetic, the mismatch rejection, the numbering, and the end-to-end SSE path all run against real documents in CI (`tests/unit/test_citations.py`, `tests/api/test_chat.py`).
+>
+> The fallback above stands unchanged if the spike, once run, shows `char_location` is unusable.
+
 ### 4.8 Multi-turn
 
 Stateless API; full history resent. Last **6** turns, trimmed to a 4k-token budget, oldest dropped **whole**. Document blocks are not repeated in history (only the turn-1 résumé block persists, deliberately, for cache reuse).
@@ -359,6 +369,14 @@ event: done      data: {"message_id","usage":{"input_tokens","output_tokens","ca
 ```
 
 SSE over WebSockets: strictly one-directional, survives every proxy, no Channels/ASGI/Redis layer, ~30 lines on `StreamingHttpResponse`, and it degrades to a readable `curl` transcript — which is how I debug it. The browser talks to the API origin directly (CORS locked to the web origin) rather than through a Next rewrite that may buffer.
+
+> **Three corrections made while building M5, recorded rather than quietly absorbed.**
+>
+> **(a) `Connection: keep-alive` is not ours to send.** It appears in essentially every SSE tutorial, and WSGI's `start_response` asserts on hop-by-hop headers — so the endpoint returned 200 across the entire test suite and 500 against the actual dev server, because Django's test client never reaches `start_response`. Removed; `apps/chat/streaming.py` now carries a `HOP_BY_HOP` set and a test that reads it, which is the only way the suite can see a class of bug it structurally cannot execute.
+>
+> **(b) The 15-second heartbeat lives in the gateway, not the SSE layer.** A generator blocked in `next()` cannot notice silence, so the upstream read has to happen on a worker thread — but the first version put that thread *around* the gateway, which meant the `finally` ledger write ran on a different Django database connection than the request. That is invisible under autocommit and a foreign-key violation the moment anything wraps the request in a transaction. Moving the thread inside the gateway keeps the ledger write on the request thread; the worker now touches nothing but the network. The gateway yields `None` as the heartbeat sentinel and the SSE layer translates it to `: ping`.
+>
+> **(c) The system prompt is two blocks, not one.** §4.7 describes one frozen block whose section 1 swaps by mode. Implemented as a cached mode-independent body plus a short *uncached* mode line, because a single block means switching between analysis and interview mode re-pays for ~900 tokens of identical text. Same content, same freeze, same SHA pin — one extra block boundary buys cache reuse across modes.
 
 ---
 

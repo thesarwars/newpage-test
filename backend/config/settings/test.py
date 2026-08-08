@@ -14,6 +14,7 @@ from .base import *  # noqa: F403
 
 DEBUG = False
 LLM_BACKEND = "fake"
+LLM_FAKE_DELAY_S = 0.0
 ANTHROPIC_API_KEY = ""
 
 # Generated per process rather than hard-coded. Tests need a *valid* key, not a

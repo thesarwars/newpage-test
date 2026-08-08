@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import unicodedata
 
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from apps.documents.normalize import INVISIBLE, normalize
@@ -31,6 +31,11 @@ _HOSTILE = st.text(
 
 
 @given(_HOSTILE)
+# Pinned, because a randomised search that found this once is not guaranteed to
+# find it again. De-hyphenation ran before trailing-space stripping, so "a- \nb"
+# survived pass 1 and was joined on pass 2 — three characters, no error, and
+# every stored offset silently wrong after a re-ingest.
+@example(raw="a- \na")
 def test_normalize_is_idempotent(raw: str) -> None:
     """normalize(normalize(x)) == normalize(x).
 

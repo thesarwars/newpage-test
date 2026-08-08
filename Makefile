@@ -7,7 +7,7 @@ API     := $(COMPOSE) exec -T api
 WEB     := $(COMPOSE) exec -T web
 
 .DEFAULT_GOAL := help
-.PHONY: help up down build logs migrate makemigrations shell test test-web eval eval-baseline lint fmt typecheck clean
+.PHONY: help up down build logs migrate makemigrations shell test test-web eval eval-baseline smoke-live smoke-sse lint fmt typecheck clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -52,6 +52,24 @@ eval: ## Retrieval evaluation against the golden set (no API key needed)
 
 eval-baseline: ## Re-run the eval and commit the numbers as the new baseline
 	$(API) python manage.py run_eval --write-baseline
+
+# The one target that needs a real key. It performs the citations spike that
+# docs/PLAN.md §4.7 requires and that could not be run during the build — see
+# backend/tests/fixtures/anthropic/README.md. Add --write-fixture to record the
+# response; tests/unit/test_gateway.py then fails if the documented shape and
+# the real one disagree, which is exactly what you want it to do.
+smoke-live: ## One real API round-trip: verify the citation offset contract (needs ANTHROPIC_API_KEY)
+	$(API) python scripts/smoke_live.py $(ARGS)
+
+# Reuses the cookie jar if one exists, so this can follow an upload against the
+# same session instead of silently asking an empty workspace a question. Reads
+# the jar but never rewrites it: `curl -c` on every call rotates the session out
+# from under a sequence of requests that were meant to share one.
+smoke-sse: ## Stream one chat answer through curl, no key required. Usage: make smoke-sse Q="..."
+	$(COMPOSE) exec -T api sh -c '[ -f /tmp/cia.jar ] || curl -sS -c /tmp/cia.jar -X POST http://localhost:8000/api/v1/sessions/ -o /dev/null; \
+		curl -N -sS -b /tmp/cia.jar -X POST http://localhost:8000/api/v1/chat/ \
+			-H "Content-Type: application/json" \
+			-d "{\"message\": \"$(Q)\"}"'
 
 lint: ## ruff + mypy
 	$(API) ruff check .

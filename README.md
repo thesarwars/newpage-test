@@ -11,10 +11,14 @@ Next.js 16 · Claude Opus 5.
 > ### 🚧 Build status — in progress
 >
 > This README documents **what actually works today**, not the finished product.
-> Five of fourteen planned milestones are complete: ingest, indexing and
-> retrieval are real, tested and measured. Chat generation and the entire
-> frontend are not built yet — [What's built](#whats-built-today) is exact about
-> the line.
+> Six of fourteen planned milestones are complete: ingest, indexing, retrieval
+> and grounded streaming chat are real, tested and measured. The entire frontend
+> is not built yet — [What's built](#whats-built-today) is exact about the line.
+>
+> One thing to know before reading further: the plan required a 30-minute spike
+> against the real API to confirm the citation response shape before writing any
+> streaming code. **No API key was available, so that spike never ran** — see
+> [The one unverified assumption](#the-one-unverified-assumption).
 >
 > The full design — including every decision below and the ones not yet
 > implemented — is in **[docs/PLAN.md](docs/PLAN.md)**.
@@ -45,9 +49,19 @@ api  →  http://localhost:8000/readyz
 ### An API key is optional
 
 `ANTHROPIC_API_KEY` is the **only** key this project ever asks for, and it is not
-required. Everything currently built runs without it — parsing, normalization,
-chunking, embedding, retrieval, requirement extraction and gap analysis are all
-local. Set it in `.env` when generation lands in M5.
+required. Everything currently built runs without it — including chat: parsing,
+normalization, chunking, embedding, retrieval, requirement extraction, gap
+analysis, the SSE stream, source chips, the retrieval trace and **working
+citations** are all local.
+
+With no key, free-text generation is served by a stub assembled from the passages
+retrieval actually selected, with **real character offsets into your real
+documents** — so clicking a citation demonstrably works rather than looking like
+it might. Every response carries `demo_mode: true` on its first frame, so a stub
+can't be mistaken for model output.
+
+What genuinely needs a key: generated prose, `make smoke-live`, and the
+server-side `fallbacks` refusal path. Set it in `.env` and restart.
 
 ### Useful targets
 
@@ -56,6 +70,8 @@ local. Set it in `.env` when generation lands in M5.
 | `make up` | Build, start, migrate, print URLs |
 | `make test` | Backend suite — no network, no API key |
 | `make eval` | Retrieval evaluation against the golden set |
+| `make smoke-sse` | Stream one chat answer through `curl` — no key needed |
+| `make smoke-live` | One real API round-trip; verifies the citation offset contract (**needs a key**) |
 | `make lint` | ruff, ruff format, mypy |
 | `make down` / `make clean` | Stop / stop and drop the database volume |
 | `make logs` | Tail structured logs |
@@ -77,10 +93,10 @@ Complete and tested:
 | **M2** Ingest | Upload validation, PDF/DOCX/text parsers, text normalization, section detection, prompt-injection scanning |
 | **M3** Chunking & embeddings | Structure-aware chunking on the model's real tokenizer, structural breadcrumbs, local ONNX embeddings, HNSW + GIN indexes |
 | **M4** Retrieval & evaluation | Hybrid dense + lexical retrieval with RRF, per-job quotas, section anchors, an evidence floor, deterministic scope resolution and intent routing, keyless requirement extraction, and a golden-set eval gating CI |
+| **M5** LLM & streaming chat | Single-call-site Anthropic gateway with a `finally` cost ledger, frozen SHA-pinned system prompt, context assembly, native-citation offset mapping, SSE streaming, per-session throttles, a daily spend ceiling, and a keyless stub backend that still cites real spans |
 
-Not built yet: the LLM gateway and streaming chat with citations (M5), and the
-entire frontend (M6+). The `web` container currently serves the default Next.js
-page.
+Not built yet: the entire frontend (M6+). The `web` container currently serves
+the default Next.js page — everything below is reachable via `curl`.
 
 ### Retrieval quality, measured
 
@@ -107,6 +123,37 @@ am I missing?" are the ones describing what the candidate has.
 CI fails the build if fused hit-rate drops below 0.95 or routing below 1.000.
 The committed numbers live in `backend/evals/baseline.json`.
 
+### The one unverified assumption
+
+`docs/PLAN.md` sequences a 30-minute spike against the real API **before** any
+streaming code: send a two-block document request, confirm the `char_location`
+citation shape, record it as a fixture. **No `ANTHROPIC_API_KEY` was available at
+any point during this build, so it never ran.**
+
+That leaves exactly one thing in this repository asserted rather than measured:
+the field names in `llm/gateway.py::_parse_event`, which come from the documented
+response shape. Everything downstream of that function is verified against real
+documents in CI — the offset arithmetic, the rejection of citations that don't
+match the source text, the numbering, and the full SSE path.
+
+Rather than paper over it:
+
+- The parser reads every field through `getattr`, so a name mismatch costs the
+  clickable marks, never the answer or the request.
+- `backend/tests/fixtures/anthropic/raw_stream_events.json` pins the assumption
+  and carries a `_warning` field saying the test passes *because* the fixture and
+  the parser would share any error.
+- **`make smoke-live` is the spike, as one command.** It sends the request, prints
+  every raw event, and verifies `block_text[start:end] == cited_text` for each
+  citation — exiting non-zero if it fails, so it is a gate rather than something
+  to read and nod at. `make smoke-live ARGS=--write-fixture` re-records the
+  fixture; `make test` then fails if the real shape and the documented one
+  disagree, which is the point.
+
+If it turns out `char_location` is unusable, the documented fallback is
+server-numbered `[S1]` markers with a regex mapper — about twenty lines, and
+visibly worse UX.
+
 ### Try what exists
 
 ```bash
@@ -123,6 +170,35 @@ and injection findings. `backend/fixtures/adversarial_job.pdf` contains a real
 prompt-injection payload rendered in white-on-white text — upload it to see the
 scanner catch it.
 
+Then ask it something. `make smoke-sse Q="What am I missing for this role?"` does
+this for you, or:
+
+```bash
+curl -N -sS -b /tmp/jar -X POST http://localhost:8000/api/v1/chat/ \
+     -H "Content-Type: application/json" \
+     -d '{"message": "What am I missing for this role?"}'
+```
+
+```
+event: status    data: {"phase":"resolving", ...}
+event: scope     data: {"job_ids":[...],"intent":"gap","resolved_from":"Job #2","demo_mode":true}
+event: sources   data: {"chunks":[{"id":...,"section":"REQUIREMENTS","preview":"..."}]}
+event: delta     data: {"text":"You're short on production "}
+event: citation  data: {"index":1,"answer_char":267,"char_start":104,"char_end":157,"cited_text":"..."}
+event: done      data: {"usage":{...},"ttft_ms":14,"grounding":{"citations":3,"max_score":0.543}}
+```
+
+`sources` lands **before any text exists** — grounding visibly happens first, so
+the answer reads as derived rather than generated. Every `citation` carries
+offsets into `Document.normalized_text`, verified server-side against the stored
+text before it is sent; one that doesn't match is dropped rather than shown,
+because a mark on the wrong span is worse than a missing one.
+
+Two things cost zero tokens by design: an out-of-scope question
+(`"What's the weather?"`) and a question retrieval can't support are both refused
+before any call is made. `GET /api/v1/traces/{message_id}/` shows exactly why
+each passage was chosen and what the message cost.
+
 ### Current API
 
 | Method | Path | Purpose |
@@ -132,6 +208,10 @@ scanner catch it.
 | `GET` `POST` | `/api/v1/documents/` | List / upload |
 | `POST` | `/api/v1/documents/paste/` | Paste text — the fallback every parse error points at |
 | `GET` `PATCH` `DELETE` | `/api/v1/documents/{id}/` | Detail (incl. `normalized_text`) / rename / delete |
+| `POST` | `/api/v1/chat/` | **SSE.** Ask a question; streams status, scope, sources, deltas, citations, done |
+| `GET` | `/api/v1/chat/messages/` | Conversation history with citations, for a page reload |
+| `GET` | `/api/v1/traces/{message_id}/` | Full retrieval trace + the LLM calls that message made |
+| `GET` | `/api/v1/usage/` | Session totals, daily spend against the ceiling, last 20 calls |
 | `GET` | `/healthz` `/readyz` `/version` | Liveness / readiness / build identity |
 
 ---

@@ -11,6 +11,7 @@ never fired", a statement you can act on.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 import structlog
@@ -42,11 +43,16 @@ class RetrievalTrace:
     resolved_from: str = ""
     dense_hits: list[dict[str, object]] = field(default_factory=list)
     lexical_hits: list[dict[str, object]] = field(default_factory=list)
+    fused: list[dict[str, object]] = field(default_factory=list)
     selected_chunk_ids: list[str] = field(default_factory=list)
     anchors_applied: list[str] = field(default_factory=list)
     quota_applied: bool = False
     max_score: float = 0.0
     context_chars: int = 0
+    # Wall-clock per stage. Cheap to collect and the first thing anyone asks
+    # when the answer is slow — without it "retrieval was slow" is a guess
+    # about which of five stages was slow.
+    timings_ms: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -91,13 +97,22 @@ def retrieve(
     expanded = _expand(message, session=session, scope=scope, intent=intent)
     trace.expanded_query = expanded
 
+    embed_started = time.monotonic()
     embedder = get_embedder()
+    query_vector = embedder.embed_query(message)
+    trace.timings_ms["embed"] = _elapsed(embed_started)
+
+    dense_started = time.monotonic()
     dense_hits = dense.search(
         session=session,
-        query_vector=embedder.embed_query(message),
+        query_vector=query_vector,
         document_ids=scope.document_ids,
     )
+    trace.timings_ms["dense"] = _elapsed(dense_started)
+
+    lexical_started = time.monotonic()
     lexical_hits = lexical.search(session=session, query=expanded, document_ids=scope.document_ids)
+    trace.timings_ms["lexical"] = _elapsed(lexical_started)
 
     trace.dense_hits = [
         {"chunk_id": c.chunk_id, "rank": c.rank, "score": round(c.score, 4)}
@@ -108,7 +123,10 @@ def retrieve(
         for c in lexical_hits[:10]
     ]
 
+    fuse_started = time.monotonic()
     fused = fusion.reciprocal_rank_fusion(dense_hits, lexical_hits)
+    trace.fused = [{"chunk_id": f.chunk_id, "rrf": round(f.rrf, 6)} for f in fused[:10]]
+    trace.timings_ms["fuse"] = _elapsed(fuse_started)
     # Relevance is judged on the dense arm's best cosine score; ordering comes
     # from RRF. See fusion.evaluate_floor.
     top_similarity = max((c.score for c in dense_hits), default=0.0)
@@ -212,3 +230,7 @@ def _materialize(*, session: Session, selected: list[fusion.Fused]) -> list[Chun
         budget -= len(chunk.text)
 
     return ordered
+
+
+def _elapsed(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)

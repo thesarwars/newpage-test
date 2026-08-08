@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "apps.documents",
     "apps.rag",
     "apps.analysis",
+    "apps.chat",
     "apps.observability",
 ]
 
@@ -110,6 +111,13 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
     "UNAUTHENTICATED_USER": None,
     "EXCEPTION_HANDLER": "apps.core.errors.exception_handler",
+    # Two windows on chat, because one is always the wrong shape: 20/min alone
+    # permits 1,200 an hour, and 60/hour alone permits all 60 in one second.
+    "DEFAULT_THROTTLE_RATES": {
+        "chat_burst": env("THROTTLE_CHAT_BURST", default="20/min"),
+        "chat_sustained": env("THROTTLE_CHAT_SUSTAINED", default="60/hour"),
+        "upload": env("THROTTLE_UPLOAD", default="20/hour"),
+    },
 }
 
 CORS_ALLOWED_ORIGINS = env("CORS_ALLOWED_ORIGINS")
@@ -124,6 +132,7 @@ LLM_DAILY_COST_CEILING_USD = env("LLM_DAILY_COST_CEILING_USD")
 # visibly instead of arriving whole. Zero in tests — the suite should not spend
 # wall-clock proving that `time.sleep` sleeps.
 LLM_FAKE_DELAY_S = env.float("LLM_FAKE_DELAY_S", default=0.012)
+CIA_CHAT_EFFORT = env("CIA_CHAT_EFFORT", default="medium")
 EMBEDDING_BACKEND = env("EMBEDDING_BACKEND", default="local")
 EMBEDDING_MODEL = env("EMBEDDING_MODEL", default="BAAI/bge-small-en-v1.5")
 # Where the ONNX weights are baked at image build time (backend/Dockerfile).
