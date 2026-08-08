@@ -24,3 +24,7 @@ test-results/
 
 # Embedding model cache used by CI (weights are baked into the image locally)
 backend/.fastembed/
+
+# AI assistant house rules — kept local, not published
+CLAUDE.md
+AGENTS.md

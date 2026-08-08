@@ -1,0 +1,323 @@
+# Career Intelligence Assistant
+
+A conversational RAG assistant over a résumé and multiple job descriptions. Upload
+your CV and the postings you're considering, then ask about fit, skill gaps,
+experience alignment and interview preparation — with every answer backed by
+clickable, character-exact citations into the source document.
+
+**Stack:** Django 5.2 + DRF · PostgreSQL 17 + pgvector · local ONNX embeddings ·
+Next.js 16 · Claude Opus 5.
+
+> ### 🚧 Build status — in progress
+>
+> This README documents **what actually works today**, not the finished product.
+> Four of fourteen planned milestones are complete: the backend ingest and
+> indexing pipeline is real and tested; retrieval, chat and the entire frontend
+> are not built yet. [What's built](#whats-built-today) is exact about the line.
+>
+> The full design — including every decision below and the ones not yet
+> implemented — is in **[docs/PLAN.md](docs/PLAN.md)**.
+
+---
+
+## Quick setup
+
+Requires Docker and Docker Compose. Nothing else — no Python, Node or Postgres
+on your machine.
+
+```bash
+git clone https://github.com/thesarwars/newpage-test.git
+cd newpage-test
+make up
+```
+
+That builds the images, generates a local `.env` with fresh random secrets,
+starts three containers and applies migrations. First build takes a few minutes
+(it bakes a ~130 MB embedding model into the image); afterwards a cold start is
+about 30 seconds.
+
+```
+web  →  http://localhost:3000     (Next.js scaffold — no UI yet, see build status)
+api  →  http://localhost:8000/readyz
+```
+
+### An API key is optional
+
+`ANTHROPIC_API_KEY` is the **only** key this project ever asks for, and it is not
+required. Everything currently built runs without it — parsing, normalization,
+chunking, embedding, indexing and retrieval are all local. Set it in `.env` when
+generation lands in M5.
+
+### Useful targets
+
+| Command | What it does |
+|---|---|
+| `make up` | Build, start, migrate, print URLs |
+| `make test` | Backend suite — no network, no API key |
+| `make lint` | ruff, ruff format, mypy |
+| `make down` / `make clean` | Stop / stop and drop the database volume |
+| `make logs` | Tail structured logs |
+
+**Everything runs in the container.** `make` is the only supported entry point —
+host Python is likely 3.14, where `onnxruntime` has no wheels. Running `pytest`
+directly on the host will fail with a confusing dependency error.
+
+---
+
+## What's built today
+
+Complete and tested:
+
+| Milestone | What landed |
+|---|---|
+| **M0** Scaffold | Compose (db/api/web), multi-stage Dockerfiles, Makefile, CI across five jobs |
+| **M1** Ops spine | Anonymous session tenancy, structured logging with PII redaction, error envelope, `/healthz` `/readyz` `/version` |
+| **M2** Ingest | Upload validation, PDF/DOCX/text parsers, text normalization, section detection, prompt-injection scanning |
+| **M3** Chunking & embeddings | Structure-aware chunking on the model's real tokenizer, structural breadcrumbs, local ONNX embeddings, HNSW + GIN indexes |
+
+Not built yet: hybrid retrieval and the evaluation harness (M4), the LLM gateway
+and streaming chat with citations (M5), and the entire frontend (M6+). The
+`web` container currently serves the default Next.js page.
+
+### Try what exists
+
+```bash
+# Create a session, upload a résumé and a job description
+curl -sS -c /tmp/jar -X POST http://localhost:8000/api/v1/sessions/
+curl -sS -b /tmp/jar -F "file=@backend/fixtures/demo/resume.pdf" -F "kind=resume" \
+     http://localhost:8000/api/v1/documents/
+curl -sS -b /tmp/jar -F "file=@backend/fixtures/demo/job_2_vertex.pdf" -F "kind=job" \
+     http://localhost:8000/api/v1/documents/
+```
+
+The response carries detected sections with character offsets, boilerplate flags,
+and injection findings. `backend/fixtures/adversarial_job.pdf` contains a real
+prompt-injection payload rendered in white-on-white text — upload it to see the
+scanner catch it.
+
+### Current API
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/sessions/` | Create (or return) an anonymous workspace |
+| `GET` `DELETE` | `/api/v1/sessions/current/` | Hydrate / hard-delete everything |
+| `GET` `POST` | `/api/v1/documents/` | List / upload |
+| `POST` | `/api/v1/documents/paste/` | Paste text — the fallback every parse error points at |
+| `GET` `PATCH` `DELETE` | `/api/v1/documents/{id}/` | Detail (incl. `normalized_text`) / rename / delete |
+| `GET` | `/healthz` `/readyz` `/version` | Liveness / readiness / build identity |
+
+---
+
+## Architecture
+
+```
+┌──────────────────────── browser ────────────────────────┐
+│  Next.js 16  ·  workspace  ·  gap matrix          (M6+) │
+└───────┬─────────────────────────────────┬───────────────┘
+        │ fetch(credentials:'include')    │ SSE            (M5)
+        ▼                                 ▼
+┌────────────────── api (gunicorn, gthread) ──────────────────┐
+│ core/       session cookie · request-id · structlog · errors │
+│ documents/  validate → parse → normalize → scan → section    │
+│             → chunk → embed                                  │
+│ rag/        embeddings (local ONNX)                          │
+│             dense · lexical · RRF · quota · anchors    (M4)  │
+│ llm/        AnthropicGateway — the ONLY call site      (M5)  │
+└───────┬──────────────────────────────────────┬──────────────┘
+        │ SQL (rows + vectors + tsvector)      │ HTTPS  (M5)
+        ▼                                      ▼
+┌──────────────────────┐            ┌─────────────────────┐
+│ Postgres 17 +pgvector│            │  api.anthropic.com  │
+│ HNSW + GIN indexes   │            │  (optional)         │
+└──────────────────────┘            └─────────────────────┘
+```
+
+Three services, and there is deliberately no fourth. No message broker: ingest is
+bounded by hard intake caps (10 MB, 30 pages) to a few seconds, so a queue would
+add two stateful services and a "stuck in parsing forever" failure class in
+exchange for latency nobody notices. No separate vector database: pgvector lives
+in the same Postgres, so a retrieval query is one query plan and one transaction.
+
+### The ingest pipeline
+
+```
+validate → parse → normalize → scan → sections → chunk → embed → index
+```
+
+Everything downstream of `normalize` indexes into a single canonical string,
+`Document.normalized_text`. Sections, chunks and (in M5) the model's own citation
+offsets are all character positions in that one string. The invariant
+
+```
+normalized_text[chunk.char_start:chunk.char_end] == chunk.text
+```
+
+is property-tested with Hypothesis and verified in SQL against stored rows. The
+entire evidence-panel feature is that one assertion — if it breaks, citations
+highlight the wrong span and nothing raises an error.
+
+---
+
+## Engineering standards
+
+**Followed.** Typed protocols at every swap seam (embedder, requirement
+extractor, task runner). `mypy --strict` on the packages that carry logic.
+Structured JSON logs with PII redaction on by default. One canonical text
+representation. Containerised, one command to run. CI on every push: ruff, mypy,
+tests against a real pgvector service, frontend lint/typecheck/build, a full
+compose build, and secret scanning over complete git history.
+
+**Deliberately skipped**, each with the trigger that would change my mind:
+
+| Skipped | Trigger to add |
+|---|---|
+| Authentication | Any real user data. `session_id` is already the tenant column, so it's a middleware swap plus Postgres RLS. |
+| Celery / Redis | Ingest exceeding ~20s, batch upload, or OCR. |
+| Dedicated vector DB | >1M chunks, or measured ANN recall/latency problems. |
+| Orchestration framework | Never at this scope — see below. |
+| OCR | Scanned PDFs are rejected with a specific error pointing at the paste fallback. |
+| `/metrics`, OpenTelemetry | Multi-replica deployment. |
+
+### Testing
+
+**156 tests**, no network and no API key required.
+
+| Area | Tests |
+|---|---|
+| Injection scanning | 28 |
+| Document API (incl. cross-tenant probes) | 27 |
+| Chunking, offsets, tokenizer | 24 |
+| Section detection | 21 |
+| Parsers & upload validation | 15 |
+| Sessions | 11 |
+| Normalization (property-based) | 10 |
+| Logging, redaction, tenancy, health | 20 |
+
+Roughly 3,600 lines of application code against 1,700 lines of tests. Three
+properties are treated as non-negotiable: the chunk-offset invariant, the tenancy
+guard (session A must not reach session B's data, and a foreign UUID must 404
+identically to a missing one), and "CI cannot spend money" — the test settings
+pin the LLM backend to a fake, and that assertion caught a real misconfiguration
+on its first run.
+
+The embedder is **not** mocked. fastembed on CPU is deterministic, so tests
+exercise the true encoding path; mocking it would mean the retrieval tests assert
+nothing.
+
+---
+
+## Key technical decisions
+
+> **Note to the reviewer:** the sections below record decisions made during the
+> build. They are being expanded into fuller reasoning as the remaining
+> milestones land — see [docs/PLAN.md](docs/PLAN.md) §2 and §4 for the complete
+> argument behind each, including the alternatives considered.
+
+**Local embeddings, not a hosted embedder.** Anthropic has no embeddings
+endpoint, so any hosted embedder means a *second* vendor key. A reviewer who
+doesn't have one gets an app that doesn't run. `bge-small-en-v1.5` runs on CPU
+via ONNX with the weights baked into the image, which also makes CI hermetic and
+retrieval deterministic. It sits behind an `Embedder` protocol, so swapping to
+Voyage or OpenAI is one class plus a documented reindex.
+
+**Postgres + pgvector, not a dedicated vector database.** The dominant retrieval
+operation here is a metadata filter (`document_id IN (…)`, `session_id = …`) —
+that's SQL, not a bolt-on filter DSL. And the lexical arm of hybrid retrieval has
+to live in the same query plan for rank fusion to work. One datastore, one
+transaction, one backup story.
+
+**No orchestration framework.** Prompt caching is a byte-exact prefix match and
+tenancy is a SQL predicate — those are the two things this application most needs
+to own precisely, and a framework abstracts both.
+
+**Real tokenizer, not a character proxy.** A 4-chars-per-token estimate reads
+`"Production Kubernetes experience, not just running kubectl."` as 14 tokens; the
+encoder sees 17. Scaled to a 512-token budget that's roughly 100 tokens of every
+chunk's tail silently dropped by the encoder — a retrieval bug with no symptom.
+Chunking asks the model's own tokenizer and asserts against its limit.
+
+**Structural breadcrumbs, not generated ones.** A bullet reading *"Reduced p99
+latency from 1.4s to 380ms"* carries no signal about which employer. Anthropic's
+contextual-retrieval recipe fixes this with one LLM call per chunk; the structure
+was already in the section headings, so deriving `[Résumé — Experience — Senior
+Backend Engineer, Meridian Logistics]` costs zero tokens. I'm deliberately *not*
+claiming the published 35–49% improvement figure — that's for the generated
+variant, and M4's evaluation will measure what this actually buys.
+
+**Prompt injection is treated as a real threat.** The adversary is the job
+posting, not the user. Defence is structural first: document content only ever
+enters as `document` content blocks in a user turn, never concatenated into an
+instruction position. On top of that, an ingest-time scanner catches
+imperative-override patterns, invisible characters and — using per-character font
+and colour data from `pdfplumber` — text rendered white-on-white or at 0pt.
+Flagged spans are excluded from retrieval *and shown to the user*, because a
+silent filter is a guardrail while an auditable one is a product feature. The
+scanner will miss a naturally-phrased injection; that's stated plainly rather
+than papered over.
+
+---
+
+## What I'd do differently / next
+
+Immediate, in order: hybrid retrieval with a measured ablation (dense vs lexical
+vs fused), then the evaluation harness — a hand-written golden question set with
+CI gates on hit-rate and citation validity, so retrieval quality is a number
+rather than an assertion. Then the LLM gateway with a single call site and a cost
+ledger, and streaming chat with native citations.
+
+The image is currently **2.2 GB** (onnxruntime plus baked weights). That's a real
+cost to a reviewer's first `make up` and I haven't attacked it yet.
+
+Page-level citation offsets were dropped: mapping them honestly requires
+normalizing per page, and nothing consumes them today. A nullable column nobody
+fills is worse than no column.
+
+---
+
+## Secrets and privacy
+
+A résumé is PII by construction, and the design treats it that way rather than
+bolting on a policy afterwards.
+
+- **No third-party analytics, no session replay, no CDN fonts.** The only
+  external egress is `api.anthropic.com`, and only once generation lands.
+- **Logs carry ids and content hashes, never document text.** A `log_safe()`
+  helper is the only sanctioned way to reference a document in a log — it
+  physically cannot emit text because it never receives it — and a redaction
+  processor scrubs emails, phone numbers and URLs as a second layer.
+- **"Delete everything" is a first-class control**, not a buried setting.
+  Sessions carry a 7-day TTL with a `purge_expired` command that makes the
+  retention claim true rather than aspirational.
+- **Nothing password-shaped is committed.** `.env.example` ships blank values;
+  `make up` generates them locally into a gitignored `.env`. Compose *requires*
+  the database password with no fallback, so a missing value fails loudly rather
+  than silently starting Postgres with a password every checkout would know.
+
+> One historical note, since a scanner will find it: commit `71d0c2e` contained
+> `POSTGRES_PASSWORD=cia` as a local development default. It was a container
+> password bound to a non-default localhost port that never protected anything
+> reachable, and there is nothing to rotate. It has been removed going forward.
+
+---
+
+## Repository layout
+
+```
+├── docs/
+│   ├── PLAN.md          the full design and build plan — start here
+│   └── ASSIGNMENT.md    the original brief
+├── backend/
+│   ├── apps/core/       session tenancy, logging, errors, health
+│   ├── apps/documents/  parsers, normalize, sanitize, chunking, ingest
+│   ├── apps/rag/        embeddings (retrieval lands in M4)
+│   ├── fixtures/        synthetic demo corpus + adversarial fixture
+│   ├── scripts/         fixture generation (committed, so the PDFs are auditable)
+│   └── tests/           unit + api
+├── frontend/            Next.js scaffold (UI lands in M6+)
+├── docker-compose.yml
+└── Makefile
+```
+
+The demo corpus is entirely synthetic — invented people, invented companies —
+and generated by a committed script, so the contents of those PDFs (including the
+injection payload) are auditable rather than opaque binaries.
