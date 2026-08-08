@@ -19,6 +19,14 @@ dependencies = [
     # detected (apps/documents/sanitize.py). Slower, and irrelevant at <=30 pages.
     "pdfplumber>=0.11",
     "python-docx>=1.1",
+    # Local ONNX embeddings. Anthropic has no embeddings endpoint, and any
+    # hosted embedder is a second vendor key the reviewer does not have — which
+    # would mean the app does not run. Also makes CI hermetic and retrieval
+    # deterministic. See docs/PLAN.md §2.
+    "fastembed>=0.5",
+    # Imported directly by chunking/tokenizer.py. Arrives transitively via
+    # fastembed, but a module that imports it should declare it.
+    "tokenizers>=0.21",
 ]
 
 [dependency-groups]
@@ -61,6 +69,11 @@ ignore = ["E501"]
 "apps/documents/normalize.py" = ["RUF001"]
 "apps/documents/chunking/sections.py" = ["RUF001"]
 "apps/documents/sanitize.py" = ["RUF001"]
+# Same reason, extended to the chunking modules and their tests: en dashes
+# and bullet glyphs are the input these files exist to handle, and they are
+# quoted in the docstrings that explain the handling.
+"apps/documents/chunking/*.py" = ["RUF001", "RUF002"]
+"tests/unit/test_chunking.py" = ["RUF001", "RUF002"]
 "tests/unit/test_normalize.py" = ["RUF001"]
 # Fixture generation is a CLI script; printing what it wrote is the interface.
 "scripts/*" = ["T201"]

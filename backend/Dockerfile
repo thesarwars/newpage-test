@@ -26,6 +26,14 @@ FROM base AS deps
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 
+# Bake the ONNX embedding weights (~130 MB) into the image. Two reasons: a cold
+# container never reaches out to HuggingFace on the first upload, and the app
+# works offline once built. The cost is that `docker compose build` needs
+# network — stated in the README, because a reviewer should not discover it.
+ENV FASTEMBED_CACHE_PATH=/opt/models
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')" \
+    && chmod -R a+rX /opt/models
+
 # ─── dev ──────────────────────────────────────────────────────────────────────
 FROM deps AS dev
 RUN uv sync --frozen --no-install-project --group dev

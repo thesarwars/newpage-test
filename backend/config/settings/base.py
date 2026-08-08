@@ -27,11 +27,13 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
+    "django.contrib.postgres",
     "django.contrib.staticfiles",
     "rest_framework",
     "corsheaders",
     "apps.core",
     "apps.documents",
+    "apps.rag",
 ]
 
 MIDDLEWARE = [
@@ -116,6 +118,8 @@ LLM_BACKEND = env("LLM_BACKEND", default="auto")  # auto | anthropic | fake
 LLM_DAILY_COST_CEILING_USD = env("LLM_DAILY_COST_CEILING_USD")
 EMBEDDING_BACKEND = env("EMBEDDING_BACKEND", default="local")
 EMBEDDING_MODEL = env("EMBEDDING_MODEL", default="BAAI/bge-small-en-v1.5")
+# Where the ONNX weights are baked at image build time (backend/Dockerfile).
+FASTEMBED_CACHE_PATH = env("FASTEMBED_CACHE_PATH", default="/opt/models")
 
 # Structured logs to stdout, with PII redaction on by default. Configured here
 # rather than in AppConfig.ready() so logging is live before the app registry
