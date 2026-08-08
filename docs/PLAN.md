@@ -337,6 +337,16 @@ Base `/api/v1/`. Session via httpOnly signed cookie `cis_session` (SameSite=Lax)
 | `GET` | `/sessions/current/` | Hydrate: documents, messages, usage, budget_remaining |
 | `DELETE` | `/sessions/current/` | Hard purge rows + files. `204` |
 | `POST` | `/sessions/demo/` | **Load demo data** — copies fixture résumé + 3 JDs, ingests, attaches precomputed FitAnalysis. `202 {document_ids[]}`. Highest-ROI endpoint in the build |
+
+> **Divergences, M6 (session + demo surface).**
+>
+> **(a) `201`, not `202`.** Ingestion here is synchronous, and `202 Accepted` promises a resource that does not exist yet. By the time the demo endpoint responds the four documents are parsed, chunked, embedded and queryable — so it says `201` and returns the serialized documents, and the client renders the rail from the response instead of polling for a result it already has. "Attaches precomputed FitAnalysis" is deferred to M8 along with the model; nothing is precomputed today, and the demo runs the same ingest an upload does, which is the more useful property anyway.
+>
+> **(b) Seeding a non-empty workspace is refused** with `409 workspace_not_empty` rather than merged. The session allows one résumé, so merging would fail deep inside the quota check with an error about résumé counts — true, and it tells the user nothing about what they actually did.
+>
+> **(c) `rail_order()` was needed and was not in the plan.** `Document.Meta.ordering` is `(kind, ordinal)`, which sorts alphabetically — so `job` precedes `resume` and the rail put the postings above the CV. Worse, a fresh seed returned corpus order while a reloaded workspace returned model order: the same four documents in two different orders, which reads as a rendering bug. Ordering now lives in one function that every client-facing list goes through, rather than in the client.
+>
+> **(d) §8.5's egress claim needed defending, not asserting.** Next.js posts anonymous telemetry to Vercel by default, so "the only external egress is `api.anthropic.com`" was true of the backend and false of the app. `NEXT_TELEMETRY_DISABLED` is now set in the image, in compose, and in CI.
 | `POST` | `/documents/` | multipart `{file, kind, label?}` → **synchronous** ingest → `201 {id, kind, ordinal, chunk_count, sections[], injection_flag, warnings[]}`; `413`; `422 {error_code}` |
 | `POST` | `/documents/paste/` | `{kind, label, text}` — the fallback the `no_text_layer` error points at. **Not optional:** a 422 telling users to paste with nowhere to paste is a dead end on the first scanned PDF |
 | `GET` | `/documents/` | List w/ status, sections, chunk_count, fit summary |
