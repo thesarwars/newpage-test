@@ -17,7 +17,7 @@ env = environ.Env(
     LLM_DAILY_COST_CEILING_USD=(float, 10.0),
 )
 
-SECRET_KEY = env("DJANGO_SECRET_KEY", default="dev-insecure-not-for-production")
+SECRET_KEY = env("DJANGO_SECRET_KEY", default="")
 DEBUG = env("DJANGO_DEBUG")
 ALLOWED_HOSTS = env("DJANGO_ALLOWED_HOSTS")
 
@@ -74,7 +74,9 @@ DATABASES = {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": env("POSTGRES_DB", default="cia"),
         "USER": env("POSTGRES_USER", default="cia"),
-        "PASSWORD": env("POSTGRES_PASSWORD", default="cia"),
+        # No default. An empty password fails to connect loudly; a committed
+        # one would be a real credential in a public repository.
+        "PASSWORD": env("POSTGRES_PASSWORD", default=""),
         "HOST": env("POSTGRES_HOST", default="db"),
         "PORT": env("POSTGRES_PORT", default="5432"),
     }

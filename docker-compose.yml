@@ -11,7 +11,10 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-cia}
       POSTGRES_USER: ${POSTGRES_USER:-cia}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cia}
+      # Required, with no fallback. A default here would be a known password
+      # for every checkout of a public repo, which is how "dev only" defaults
+      # end up in production. `make up` generates one into .env.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run `make up` to generate one into .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:

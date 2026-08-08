@@ -12,8 +12,7 @@ WEB     := $(COMPOSE) exec -T web
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
-up: ## Build, start, migrate, and print the URL
-	@test -f .env || cp .env.example .env
+up: .env ## Build, start, migrate, and print the URL
 	$(COMPOSE) up -d --build
 	@echo "waiting for api…" && $(COMPOSE) exec -T api sh -c 'until curl -fsS http://localhost:8000/healthz >/dev/null 2>&1; do sleep 1; done' || true
 	-$(API) python manage.py migrate --noinput
@@ -21,6 +20,11 @@ up: ## Build, start, migrate, and print the URL
 	@echo "  web  →  http://localhost:3000"
 	@echo "  api  →  http://localhost:8000/healthz"
 	@echo ""
+
+.env: .env.example ## Create .env with freshly generated local secrets
+	@cp .env.example .env
+	@printf '%s\n' "$$(sed "s|^DJANGO_SECRET_KEY=.*|DJANGO_SECRET_KEY=$$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 50)|; s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 32)|" .env)" > .env.tmp && mv .env.tmp .env
+	@echo "generated .env with fresh local secrets (gitignored)"
 
 down: ## Stop and remove containers (keeps the database volume)
 	$(COMPOSE) down

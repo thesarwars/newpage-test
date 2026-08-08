@@ -23,7 +23,11 @@ jobs:
         env:
           POSTGRES_DB: cia
           POSTGRES_USER: cia
-          POSTGRES_PASSWORD: cia
+          # trust, rather than a password literal. This container lives for the
+          # length of one job, is reachable only from that job, and a committed
+          # password — however throwaway — is a password-shaped string in a
+          # public repository that secret scanners are right to flag.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U cia -d cia"
@@ -53,6 +57,11 @@ jobs:
           # the model does.
           key: fastembed-bge-small-en-v1.5-v1
       - run: uv sync --frozen --group dev
+      # The cache above restores the weights; on a miss they still have to be
+      # fetched. Without this the cache step silently creates an empty directory
+      # and every tokenizer-dependent test fails on a clean cache.
+      - name: fetch embedding model
+        run: uv run python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
       - name: ruff
         run: uv run ruff check .
       - name: ruff format

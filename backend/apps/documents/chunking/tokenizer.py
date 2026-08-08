@@ -54,8 +54,11 @@ def _tokenizer_path() -> Path:
     candidates = sorted(cache_root.rglob("tokenizer.json"))
     if not candidates:
         raise RuntimeError(
-            f"No tokenizer.json under {cache_root}. The embedding model was not "
-            "baked into the image — rebuild with `make build`."
+            f"No tokenizer.json under {cache_root}. The embedding model has not been "
+            "fetched. In the container it is baked at image build — rebuild with "
+            "`make build`. Outside it (CI, or a bare checkout) fetch it first:\n"
+            '  python -c "from fastembed import TextEmbedding; '
+            "TextEmbedding('BAAI/bge-small-en-v1.5')\""
         )
     return candidates[0]
 
