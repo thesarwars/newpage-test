@@ -42,3 +42,5 @@ next-env.d.ts
 
 # pnpm's store when the container is told to keep it inside the bind mount.
 .pnpm-store/
+test-results/
+playwright-report/

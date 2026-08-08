@@ -62,9 +62,19 @@ export class SseParser {
   }
 
   private drain(): SseFrame[] {
-    // Normalise line endings first. This backend emits LF only — verified on a
-    // live capture — but the SSE spec permits CRLF and a proxy is entitled to
-    // rewrite them, at which point every frame boundary would be missed.
+    // Normalise line endings. This backend emits LF only — verified on a live
+    // capture — but the spec permits CRLF and a proxy may rewrite them, at which
+    // point every frame boundary would be missed.
+    //
+    // A *trailing* CR is held back rather than converted. Normalising it
+    // immediately turns one CRLF that happened to straddle a chunk boundary
+    // into two line breaks — a spurious frame separator that splits `event:
+    // delta` from its `data:` line. The event name is then lost and every delta
+    // arrives under the default name `message`, so a client switch statement
+    // silently ignores the entire answer. Byte-chunk replay never shows it,
+    // because this server sends no CR at all; a proxy that rewrites them does.
+    const held = this.buffer.endsWith("\r");
+    if (held) this.buffer = this.buffer.slice(0, -1);
     this.buffer = this.buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
     const frames: SseFrame[] = [];
@@ -79,6 +89,9 @@ export class SseParser {
 
       separator = this.buffer.indexOf("\n\n");
     }
+
+    // Put the held CR back so the next chunk can complete its CRLF.
+    if (held) this.buffer += "\r";
 
     return frames;
   }

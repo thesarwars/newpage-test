@@ -185,6 +185,71 @@ export function inline(line: string, start: number): Span[] {
   return spans;
 }
 
+/** A resolved mark: which span it belongs to, and where inside that span. */
+export interface Placement {
+  span: number;
+  /** Offset within the span's own text. */
+  at: number;
+  index: number;
+}
+
+/**
+ * Resolve every citation offset onto the flattened span list.
+ *
+ * The subtle part is **snap-forward**. Markdown delimiters are consumed by the
+ * parser and appear in no span, so an offset landing on one belongs nowhere: a
+ * citation at offset 1 (between the asterisks of `**bold**`), at a list marker,
+ * or at offset 0 of the answer resolves to no span at all and the mark is
+ * silently dropped — a citation the model supplied that the reader never sees.
+ *
+ * So an offset that lands in no span moves forward to the start of the next
+ * span in source order, and an offset past the last span moves to its end. That
+ * is also the correct reading rather than merely a salvage: a citation sitting
+ * on the `**` that introduces a word belongs on the word, and one at the end of
+ * the answer belongs at the end of the rendered answer.
+ */
+export function place(spans: Span[], marks: { index: number; at: number }[]): Placement[] {
+  const placements: Placement[] = [];
+
+  for (const mark of marks) {
+    let resolved: Placement | null = null;
+
+    for (let i = 0; i < spans.length; i += 1) {
+      const span = spans[i];
+      const end = span.start + span.text.length;
+
+      if (mark.at > span.start && mark.at <= end) {
+        resolved = { span: i, at: mark.at - span.start, index: mark.index };
+        break;
+      }
+      // Snap forward: the offset sits before this span and inside no earlier
+      // one, so it fell on syntax the parser consumed.
+      if (mark.at <= span.start) {
+        resolved = { span: i, at: 0, index: mark.index };
+        break;
+      }
+    }
+
+    if (!resolved && spans.length > 0) {
+      const last = spans.length - 1;
+      resolved = { span: last, at: spans[last].text.length, index: mark.index };
+    }
+    if (resolved) placements.push(resolved);
+  }
+
+  // Ascending by position, then by index. Two citations at one offset both
+  // render, adjacent and in order — dropping either loses evidence the model
+  // actually supplied.
+  return placements.sort((a, b) => a.span - b.span || a.at - b.at || a.index - b.index);
+}
+
+/** Every span in the document, in source order. */
+export function flatten(blocks: Block[]): Span[] {
+  return blocks.flatMap((block) =>
+    block.type === "paragraph" ? block.spans : block.type === "list" ? block.items.flat() : [],
+  );
+}
+
 /**
  * Split a span at every citation offset that falls strictly inside it.
  *
@@ -193,10 +258,10 @@ export function inline(line: string, start: number): Span[] {
  * attaches to the *previous* span, and two citations at the same offset both
  * emit — dropping one would silently lose evidence.
  */
-export function splitAt(span: Span, offsets: { index: number; at: number }[]): {
-  text: string;
-  citation: number | null;
-}[] {
+export function splitAt(
+  span: Span,
+  offsets: { index: number; at: number }[],
+): { text: string; citation: number | null }[] {
   const end = span.start + span.text.length;
   const inside = offsets
     .filter((o) => o.at > span.start && o.at <= end)

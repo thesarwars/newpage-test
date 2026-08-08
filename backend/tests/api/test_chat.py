@@ -224,6 +224,36 @@ class TestStream:
             [1 for name, _ in events if name == "citation"]
         )
 
+    def test_answer_char_points_just_past_the_text_it_cites(
+        self, session_client: APIClient, corpus: tuple[Document, Document]
+    ) -> None:
+        """The citation marks what came *before* it, not what comes after.
+
+        `answer_char` is the length of the answer emitted when the citation
+        arrived, so the character immediately before it is the last character of
+        the cited passage. That makes the mark render as `“…passage” [1]`.
+
+        Pinned because the semantics are invisible to every other assertion: the
+        existing `0 <= answer_char <= len(answer)` check passes whether the
+        offset is captured before or after the quote, and moving it silently
+        relocates every mark in the UI. It also decides the client's interval
+        convention — a half-open reading of this offset snaps each mark forward
+        onto the *next* list item's title, so `[1]` would label passage 2 with
+        no error anywhere.
+        """
+        events = ask(session_client, "What am I missing for this role?")
+        answer = "".join(data["text"] for name, data in events if name == "delta")
+        citations = [data for name, data in events if name == "citation"]
+        assert citations
+
+        for citation in citations:
+            at = citation["answer_char"]
+            assert at > 0
+            assert answer[at - 1] == "”", (
+                f"answer_char {at} should sit just past a closing quote, "
+                f"found {answer[at - 1]!r}"
+            )
+
     def test_answer_char_offsets_land_inside_the_answer(
         self, session_client: APIClient, corpus: tuple[Document, Document]
     ) -> None:

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { inline, parse, splitAt } from "@/lib/markdown";
+import { flatten, inline, parse, place, splitAt } from "@/lib/markdown";
 
 /** Every span's text must sit at its claimed offset in the source. */
 function offsetsAreTruthful(source: string, blocks: ReturnType<typeof parse>): void {
@@ -194,5 +194,115 @@ describe("the keyless stub's actual output", () => {
 
     expect(text).toContain("—");
     expect(text).toContain("“Reduced p99 latency from 1.4s to 380ms”");
+  });
+});
+
+describe("snap-forward placement", () => {
+  // Markdown delimiters are consumed by the parser and belong to no span, so an
+  // offset landing on one resolves nowhere and the mark is silently dropped —
+  // a citation the model supplied that the reader never sees. Every case below
+  // was demonstrated to drop a mark before `place()` existed.
+  const source = "**Demo answer.** No `KEY` is set.\n\n1. **Résumé** — “quote”";
+  const spans = flatten(parse(source));
+
+  it("places an offset that lands between the asterisks of bold", () => {
+    const [placement] = place(spans, [{ index: 1, at: 1 }]);
+
+    expect(placement).toBeDefined();
+    expect(spans[placement.span].text).toBe("Demo answer.");
+    expect(placement.at).toBe(0);
+  });
+
+  it("places an offset at the very start of the answer", () => {
+    const [placement] = place(spans, [{ index: 1, at: 0 }]);
+
+    expect(spans[placement.span].text).toBe("Demo answer.");
+  });
+
+  it("places an offset that lands on a list marker", () => {
+    const markerAt = source.indexOf("1. ");
+    const [placement] = place(spans, [{ index: 1, at: markerAt }]);
+
+    // Snapped to the next real text, which is the list item's own content.
+    expect(spans[placement.span].text).toBe("Résumé");
+  });
+
+  it("places an offset past the end of the answer at the end", () => {
+    const [placement] = place(spans, [{ index: 1, at: 99_999 }]);
+
+    expect(placement.span).toBe(spans.length - 1);
+    expect(placement.at).toBe(spans[spans.length - 1].text.length);
+  });
+
+  it("keeps both marks when two share an offset, in index order", () => {
+    const at = source.indexOf("“");
+    const placed = place(spans, [
+      { index: 2, at },
+      { index: 1, at },
+    ]);
+
+    expect(placed.map((p) => p.index)).toEqual([1, 2]);
+  });
+
+  it("splits an ordinary offset exactly where it points, without snapping", () => {
+    // A real citation offset lands on ordinary text, so the snap rule should
+    // never fire for a normal answer. If it does, something upstream drifted.
+    const at = source.indexOf("“");
+    const [placement] = place(spans, [{ index: 1, at }]);
+    const span = spans[placement.span];
+
+    const [before, after] = splitAt(span, [{ index: 1, at }]);
+    expect(before.text.endsWith("— ")).toBe(true);
+    expect(after.text.startsWith("“")).toBe(true);
+  });
+
+  it("resolves every offset to somewhere, for any offset at all", () => {
+    for (let at = 0; at <= source.length + 5; at += 1) {
+      expect(place(spans, [{ index: 1, at }])).toHaveLength(1);
+    }
+  });
+});
+
+describe("the interval convention", () => {
+  /**
+   * Closed on the right: an offset exactly at a span's end belongs to that
+   * span, at its end — not to whatever follows.
+   *
+   * This is load-bearing rather than a detail. The server records
+   * `answer_char` as the length emitted when the citation arrived, so it points
+   * *just past* the passage being cited — which, for a list item, is exactly
+   * the boundary between that item's text and the "\n\n" after it. Read
+   * half-open, every mark snaps forward onto the next item's title: no error,
+   * no dropped mark, no broken markup, just `[1]` labelling passage 2.
+   */
+  const source = "1. **A** — “first”\n\n2. **B** — “second”";
+  const spans = flatten(parse(source));
+
+  it("places an offset at a span's end inside that span", () => {
+    const endOfFirst = source.indexOf("“first”") + "“first”".length;
+    const [placement] = place(spans, [{ index: 1, at: endOfFirst }]);
+    const span = spans[placement.span];
+
+    expect(span.text).toContain("“first”");
+    expect(placement.at).toBe(span.text.length);
+  });
+
+  it("does not snap that offset onto the next item", () => {
+    const endOfFirst = source.indexOf("“first”") + "“first”".length;
+    const [placement] = place(spans, [{ index: 1, at: endOfFirst }]);
+
+    expect(spans[placement.span].text).not.toContain("B");
+    expect(spans[placement.span].text).not.toContain("second");
+  });
+
+  it("renders the mark after the quote it cites, not before", () => {
+    const endOfFirst = source.indexOf("“first”") + "“first”".length;
+    const [placement] = place(spans, [{ index: 1, at: endOfFirst }]);
+    const pieces = splitAt(spans[placement.span], [
+      { index: 1, at: spans[placement.span].start + placement.at },
+    ]);
+
+    expect(pieces[pieces.length - 1].citation).toBe(1);
+    expect(pieces.map((p) => p.text).join("")).toContain("“first”");
   });
 });

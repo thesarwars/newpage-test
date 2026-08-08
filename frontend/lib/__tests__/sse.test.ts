@@ -125,3 +125,49 @@ describe("payload parsing", () => {
     expect(payloadOf({ event: "delta", data: "{oops" })).toBeNull();
   });
 });
+
+describe("CRLF split across a chunk boundary", () => {
+  // The failure this guards is invisible locally: this server sends no CR at
+  // all, so byte-chunk replay of a real capture is always clean. Behind a proxy
+  // that rewrites line endings, a CRLF straddling a chunk boundary used to be
+  // normalised into TWO line breaks — a spurious frame separator that split
+  // `event: delta` from its `data:` line. The event name was then lost and
+  // every delta arrived as `message`, so the client's switch ignored the whole
+  // answer while reporting no error.
+  const CRLF = "event: delta\r\ndata: {\"text\":\"a\"}\r\n\r\nevent: done\r\ndata: {}\r\n\r\n";
+
+  it("keeps the event names when fed whole", () => {
+    const parser = new SseParser();
+
+    expect(parser.pushText(CRLF).map((f) => f.event)).toEqual(["delta", "done"]);
+  });
+
+  it("keeps them when every CR and LF is split apart", () => {
+    const parser = new SseParser();
+    const frames = [];
+    for (const char of CRLF) frames.push(...parser.pushText(char));
+    frames.push(...parser.end());
+
+    expect(frames.map((f) => f.event)).toEqual(["delta", "done"]);
+  });
+
+  it("keeps them when the cut lands exactly between CR and LF", () => {
+    const parser = new SseParser();
+    const at = CRLF.indexOf("\r\n") + 1;
+    const frames = [
+      ...parser.pushText(CRLF.slice(0, at)),
+      ...parser.pushText(CRLF.slice(at)),
+      ...parser.end(),
+    ];
+
+    expect(frames.map((f) => f.event)).toEqual(["delta", "done"]);
+    expect(frames.every((f) => f.event !== "message")).toBe(true);
+  });
+
+  it("does not invent a frame from a lone trailing CR", () => {
+    const parser = new SseParser();
+
+    expect(parser.pushText("event: delta\r")).toHaveLength(0);
+    expect(parser.pushText("\ndata: {}\r\n\r\n").map((f) => f.event)).toEqual(["delta"]);
+  });
+});

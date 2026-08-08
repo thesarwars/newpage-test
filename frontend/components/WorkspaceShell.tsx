@@ -40,32 +40,35 @@ export function WorkspaceShell({ rail, children, banner, evidence }: Props) {
       {banner}
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)_380px]">
+        {/* One rail, repositioned — not two copies behind breakpoint classes.
+            Two copies means two of every dialog, two file inputs, and two of
+            each control's accessible name in the document, which is a real
+            problem for anything walking the DOM rather than looking at it.
+            Below `lg` the grid is a single column and the rail simply sits
+            after the main content. */}
         <aside
           aria-label="Documents"
-          className="hidden min-h-0 border-hairline lg:block lg:border-r"
+          className="order-2 min-h-0 border-t border-hairline lg:order-1 lg:border-r lg:border-t-0"
         >
           {rail}
         </aside>
 
         {/* min-w-0 again on the child: the track allows shrinking, the child
             must also be told it may. */}
-        <main id="work" className="min-h-0 min-w-0 overflow-y-auto">
+        <main id="work" className="order-1 min-h-0 min-w-0 overflow-y-auto lg:order-2">
           {children}
         </main>
 
         {evidence ? (
           <aside
             aria-label="Evidence"
-            className="hidden min-h-0 border-l border-hairline xl:block"
+            className="order-3 hidden min-h-0 border-l border-hairline xl:block"
           >
             {evidence}
           </aside>
         ) : null}
       </div>
 
-      {/* Under 1024px the rail is a sheet rather than a column. Rendered here
-          rather than duplicated so there is one rail, in two positions. */}
-      <div className="border-t border-hairline lg:hidden">{rail}</div>
     </div>
   );
 }

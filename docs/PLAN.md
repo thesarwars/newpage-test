@@ -439,7 +439,7 @@ Plus: **Trace drawer** under every answer (collapsed one-liner `1.9s · 4.2k in 
 
 ### Streaming UX (perceived latency is designed, not accepted)
 
-`status: resolving` (~50ms) → `scope` (pill snaps, 1.2s toast if it changed) → `status: retrieving` → **`sources` chips animate in, 40ms stagger** → `delta` × N (`aria-live="polite"`) → `citation` marks splice in at recorded `answer_char` (merge descending so earlier indices don't shift) → `done` → grounding badge + trace fade in. The source chips landing **before any text exists** is what makes the RAG legible: grounding visibly happens first, so the answer reads as derived rather than generated. Abort keeps partial text labelled "stopped"; network drop keeps the partial and shows Retry — never a blank message.
+`status: resolving` (~50ms) → `scope` (pill snaps, 1.2s toast if it changed) → `status: retrieving` → **`sources` chips animate in, 40ms stagger** → `delta` × N (**not** a live region — see [ADR-0012](adr/0012-streaming-answers-are-not-live-regions.md): measured, this announces ~2,146 times per answer, and citation marks splice in 51–82 characters *behind* the write head, which also breaks `role="log"`'s contract) → `citation` marks splice in at recorded `answer_char` (merge descending so earlier indices don't shift) → `done` → grounding badge + trace fade in. The source chips landing **before any text exists** is what makes the RAG legible: grounding visibly happens first, so the answer reads as derived rather than generated. Abort keeps partial text labelled "stopped"; network drop keeps the partial and shows Retry — never a blank message.
 
 ### Design system
 

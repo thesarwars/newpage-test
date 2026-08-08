@@ -248,3 +248,17 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Source chips arrive on a 40ms stagger, which makes their arrival readable as
+   a sequence rather than a flash — the sequence is the thing being
+   communicated. Collapsed to instant by the reduced-motion block above. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

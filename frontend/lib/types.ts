@@ -103,6 +103,13 @@ export interface Workspace {
   messages: Message[];
 }
 
+/** A suggestion chip. `label` is what the chip says; `message` is what it asks. */
+export interface Suggestion {
+  label: string;
+  message: string;
+  intent: string;
+}
+
 /**
  * Every failure the API returns has this shape.
  *

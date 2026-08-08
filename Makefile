@@ -7,7 +7,7 @@ API     := $(COMPOSE) exec -T api
 WEB     := $(COMPOSE) exec -T web
 
 .DEFAULT_GOAL := help
-.PHONY: help up down build logs migrate makemigrations shell seed test test-web eval eval-baseline smoke-live smoke-sse lint fmt typecheck clean
+.PHONY: help up down build logs migrate makemigrations shell seed test test-web eval eval-baseline smoke-live smoke-sse e2e lint fmt typecheck clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -85,6 +85,9 @@ fmt: ## Autoformat
 
 typecheck: ## Frontend types
 	$(WEB) pnpm typecheck
+
+e2e: ## Browser acceptance test: ask -> citation -> click -> highlighted span
+	$(COMPOSE) run --rm e2e
 
 test-web: ## Frontend lint + types + unit tests + build
 	$(WEB) pnpm lint

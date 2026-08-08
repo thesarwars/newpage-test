@@ -14,10 +14,28 @@
  * envelope through intact and the UI renders `message` and `hint` verbatim.
  */
 
-import type { ApiErrorBody, Document, Workspace } from "./types";
+import type { ApiErrorBody, Document, Message, Suggestion, Workspace } from "./types";
 
-const BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+/**
+ * Where the API lives, derived from where the app was loaded from.
+ *
+ * `NEXT_PUBLIC_API_BASE_URL` remains the explicit override, and a real
+ * deployment sets it — the API is on its own domain there. The *fallback* is
+ * derived rather than hard-coded to `localhost`, because "localhost" means
+ * something different to every browser that resolves it: in the Playwright
+ * container it is the test container itself, not the machine running Docker, so
+ * a hard-coded default made every browser test load an app that could not reach
+ * its own API.
+ *
+ * Following the hostname the page was served from is also the more honest
+ * default: it works at `localhost`, at `127.0.0.1`, at `host.docker.internal`,
+ * and from another machine on the network, none of which the constant did.
+ */
+export const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  (typeof window === "undefined"
+    ? "http://localhost:8000/api/v1"
+    : `${window.location.protocol}//${window.location.hostname}:8000/api/v1`);
 
 export class ApiError extends Error {
   readonly code: string;
@@ -53,7 +71,7 @@ export class OfflineError extends Error {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${BASE}${path}`, {
+    response = await fetch(`${API_BASE}${path}`, {
       ...init,
       credentials: "include",
       headers: {
@@ -159,6 +177,32 @@ export const api = {
 
   paste(text: string, kind: string, label = ""): Promise<Document> {
     return request<Document>("/documents/paste/", json("POST", { text, kind, label }));
+  },
+
+  /**
+   * A document with its `normalized_text` — the evidence panel's data source.
+   *
+   * Immutable once ready, so the caller can cache it indefinitely: citation
+   * offsets index into exactly this string, and re-fetching it per citation
+   * would re-download a whole job description to highlight forty characters.
+   */
+  document(id: string): Promise<Document> {
+    return request<Document>(`/documents/${id}/`);
+  },
+
+  /** The retrieval trace and ledger rows for one message. Shaped by the caller,
+   * because the trace drawer is the only consumer and owns the display types. */
+  trace<T>(messageId: string): Promise<T> {
+    return request<T>(`/traces/${messageId}/`);
+  },
+
+  messages(): Promise<{ messages: Message[]; demo_mode: boolean }> {
+    return request("/chat/messages/");
+  },
+
+  suggestions(jobIds: string[], mode: string): Promise<{ suggestions: Suggestion[] }> {
+    const scope = jobIds.length ? `scope=${jobIds.join(",")}&` : "";
+    return request(`/suggestions/?${scope}mode=${mode}`);
   },
 
   remove(id: string): Promise<void> {

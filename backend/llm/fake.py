@@ -172,15 +172,19 @@ class FakeAnthropic:
 
         for position, (block_index, block, start, end) in enumerate(quotes, start=1):
             yield from self._emit(f"{position}. **{block.title}** — ")
-            answer_chars = self._chars_emitted
 
             quoted = block.text[start:end]
             yield from self._emit(f"“{quoted}”")
+            # Recorded *after* the quote, so the mark renders as `“…” [1]`.
+            # Capturing it before put the mark in front of the text it supports,
+            # which is not what a citation means. The real gateway already
+            # behaves this way by construction: a citation delta arrives after
+            # the text it cites, and `answer_char` is the length emitted so far.
+            answer_chars = self._chars_emitted
 
-            # The citation lands at the position where the quote *began*, which
-            # is where the client splices the `[n]` mark. Offsets are shifted
-            # into document coordinates by apps/chat/citations.py, using the same
-            # base_offset arithmetic the real path uses.
+            # Offsets are shifted into document coordinates by
+            # apps/chat/citations.py, using the same base_offset arithmetic the
+            # real path uses.
             yield CitationDelta(
                 document_index=block_index,
                 start_char_index=start,
