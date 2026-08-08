@@ -25,6 +25,7 @@ from typing import Any
 import structlog
 from django.conf import settings
 from django.db import transaction
+from rest_framework.renderers import BaseRenderer
 
 from apps.chat import citations as citation_map
 from apps.chat import context, guards
@@ -75,6 +76,31 @@ HOP_BY_HOP = frozenset(
         "upgrade",
     }
 )
+
+
+class EventStreamRenderer(BaseRenderer):
+    """Lets DRF's content negotiation satisfy `Accept: text/event-stream`.
+
+    Without it, the one Accept header a client would naturally send to an SSE
+    endpoint is the only one that fails: DRF negotiates a renderer in
+    `initial()`, before the view body runs, finds nothing that can produce
+    `text/event-stream`, and returns **406 Not Acceptable**. `*/*` and
+    `application/json` both work, which is why this survives casual testing —
+    curl and fetch default to `*/*`.
+
+    It never actually renders anything. The view returns a
+    `StreamingHttpResponse`, which DRF passes through untouched; this exists
+    purely so negotiation has an answer.
+    """
+
+    media_type = "text/event-stream"
+    format = "txt"
+    charset = "utf-8"
+
+    def render(
+        self, data: Any, accepted_media_type: str | None = None, renderer_context: Any = None
+    ) -> bytes:  # pragma: no cover - the view never returns through a renderer
+        return b"" if data is None else str(data).encode(self.charset)
 
 
 def sse(event: str, data: dict[str, Any]) -> bytes:

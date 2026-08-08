@@ -117,6 +117,29 @@ def ask(client: APIClient, message: str, **extra: Any) -> list[tuple[str, dict[s
     return parse_sse(response)
 
 
+@pytest.mark.django_db
+def test_the_sse_endpoint_accepts_the_sse_accept_header(
+    session_client: APIClient, corpus: tuple[Document, Document]
+) -> None:
+    """`Accept: text/event-stream` was the only value that failed.
+
+    DRF negotiates a renderer in `initial()`, before the view body runs. With no
+    renderer able to produce `text/event-stream` it returned **406 Not
+    Acceptable** — to the one header a client would naturally send to an SSE
+    endpoint. `*/*` and `application/json` both worked, which is why curl and
+    fetch never noticed.
+    """
+    for accept in ("text/event-stream", "text/event-stream, */*", "*/*", "application/json"):
+        response = session_client.post(
+            "/api/v1/chat/",
+            {"message": "What am I missing?"},
+            format="json",
+            HTTP_ACCEPT=accept,
+        )
+        assert response.status_code == 200, f"Accept: {accept} returned {response.status_code}"
+        drain(response)
+
+
 def test_sse_headers_carry_no_hop_by_hop_header() -> None:
     """`Connection: keep-alive` is in every SSE tutorial and is a 500 under WSGI.
 

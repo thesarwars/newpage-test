@@ -6,7 +6,8 @@ from typing import Any
 
 import structlog
 from django.http import StreamingHttpResponse
-from rest_framework.decorators import api_view, throttle_classes
+from rest_framework.decorators import api_view, renderer_classes, throttle_classes
+from rest_framework.renderers import JSONRenderer
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -31,6 +32,9 @@ def _current(request: Request) -> Session:
 
 
 @api_view(["POST"])
+# JSON stays first so it remains the default for the error envelope, which is a
+# real DRF Response and does need rendering.
+@renderer_classes([JSONRenderer, streaming.EventStreamRenderer])
 @throttle_classes([ChatBurstThrottle, ChatSustainedThrottle])
 def chat(request: Request) -> StreamingHttpResponse:
     """`POST /api/v1/chat/` — Server-Sent Events.
