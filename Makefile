@@ -86,9 +86,10 @@ fmt: ## Autoformat
 typecheck: ## Frontend types
 	$(WEB) pnpm typecheck
 
-test-web: ## Frontend lint + types + build
+test-web: ## Frontend lint + types + unit tests + build
 	$(WEB) pnpm lint
 	$(WEB) pnpm typecheck
+	$(WEB) pnpm test
 	$(WEB) pnpm build
 
 clean: ## Remove containers AND the database volume

@@ -108,6 +108,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      # The frontend had no test framework until M6, so `lint + typecheck +
+      # build` were three checks that could not tell you a component rendered
+      # the wrong thing. See docs/adr/0009.
+      - run: pnpm test
       - run: pnpm build
 
   docker:

@@ -443,7 +443,7 @@ Plus: **Trace drawer** under every answer (collapsed one-liner `1.9s · 4.2k in 
 
 ### Design system
 
-**Type** Geist Sans / Geist Mono, self-hosted via `next/font/local` (no CDN — see PII). Scale 12/13/14/16/20/26/34; body 14 @1.55; display @1.15, `-0.02em`. `font-variant-numeric: tabular-nums` on every score so numbers don't jitter as they animate. Mono for document text, chunk previews, trace payloads.
+**Type** Geist Sans / Geist Mono, self-hosted via `next/font/local` — see [ADR-0010](adr/0010-vendored-fonts-over-next-font-google.md). *The stated reason here was wrong:* `next/font/google` also self-hosts, so "no CDN, see PII" does not distinguish the two. The reason that does is build hermeticity — a production build behind a dead proxy **fails**, and this project runs `pnpm build` in two CI jobs plus `docker compose build`. Scale 12/13/14/16/20/26/34; body 14 @1.55; display @1.15, `-0.02em`. `font-variant-numeric: tabular-nums` on every score so numbers don't jitter as they animate. Mono for document text, chunk previews, trace payloads.
 
 **Colour** OKLCH tokens in Tailwind 4 `@theme`. Surfaces `#fcfcfb` / `#1a1a19`; ink `#0b0b0b` / `#ffffff`, secondary `#52514e` / `#c3c2b7`; accent `#2a78d6` / `#3987e5` (focus rings, citation marks, links). Fit tiers use a **reserved status palette, never the accent, never themed**:
 
@@ -454,7 +454,13 @@ Plus: **Trace drawer** under every answer (collapsed one-liner `1.9s · 4.2k in 
 | Weak ≥35 | `#ec835a` | AlertTriangle | multiple must-haves unevidenced |
 | Gap <35 | `#d03b3b` | XCircle | most must-haves missing |
 
-Amber and Weak sit under 3:1 on the light surface **by design** — mitigated because every instance ships icon + text label, so status never rides on hue alone. This also survives deuteranopia, grayscale printing, and screenshots.
+~~Amber and Weak sit under 3:1 on the light surface **by design** — mitigated because every instance ships icon + text label, so status never rides on hue alone.~~
+
+> **⚠ Superseded at M6 by [ADR-0011](adr/0011-themed-status-palette.md). Both the numbers and the mitigation above were wrong.**
+>
+> Amber is **1.79:1**, not merely "under 3:1" — under *two*. And the mitigation is circular: an icon is itself a graphical object under SC 1.4.11 and needs 3:1 in its own right, so a `CircleDashed` stroked in the failing colour is exactly as invisible as the colour it was supposed to rescue.
+>
+> "Never themed" is the cause. An un-themed colour must clear 3:1 against both a near-white page and a near-black card, which confines it to a 1.9x luminance range — and four hues compressed into a 1.9x range cannot also be far apart in luminance, which is the one channel a colour-blind or grayscale reader still has. Three un-themed palettes were computed; each fixed one axis and broke the other. The palette is now themed, measured at 3.47:1 worst case in light and 3.61:1 in dark, with colour-blind separation equal or better. Full working, including the proof that no un-themed colour can ever be AA-normal text on both surfaces, is in the ADR.
 
 **Spacing** 4px base (4/8/12/16/24/32/48). **Radius** 8 controls / 12 cards / 999 pills. **Elevation: exactly one level** — 1px border + `shadow-sm` light; raised surface + border and *no* shadow dark. **Motion** 150ms ease-out hover; 220ms `cubic-bezier(.32,.72,0,1)` panel; 40ms stagger; meters animate 0→value over 600ms once. All of it collapses to instant inside `prefers-reduced-motion`. **Dark mode** authored, not inverted (`next-themes`, three states). **Keyboard** ⌘K palette, ⌘⏎ send, Esc closes panel, `1–9` scope, `[`/`]` citations, arrows in the matrix; 2px accent focus ring at 2px offset on everything focusable.
 

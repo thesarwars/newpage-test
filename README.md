@@ -11,9 +11,10 @@ Next.js 16 · Claude Opus 5.
 > ### 🚧 Build status — in progress
 >
 > This README documents **what actually works today**, not the finished product.
-> Six of fourteen planned milestones are complete: ingest, indexing, retrieval
-> and grounded streaming chat are real, tested and measured. The entire frontend
-> is not built yet — [What's built](#whats-built-today) is exact about the line.
+> Seven of fourteen planned milestones are complete: ingest, indexing,
+> retrieval, grounded streaming chat, and the web shell — documents, upload,
+> demo seeding and deletion. The conversation UI is next
+> — [What's built](#whats-built-today) is exact about the line.
 >
 > One thing to know before reading further: the plan required a 30-minute spike
 > against the real API to confirm the citation response shape before writing any
@@ -94,9 +95,11 @@ Complete and tested:
 | **M3** Chunking & embeddings | Structure-aware chunking on the model's real tokenizer, structural breadcrumbs, local ONNX embeddings, HNSW + GIN indexes |
 | **M4** Retrieval & evaluation | Hybrid dense + lexical retrieval with RRF, per-job quotas, section anchors, an evidence floor, deterministic scope resolution and intent routing, keyless requirement extraction, and a golden-set eval gating CI |
 | **M5** LLM & streaming chat | Single-call-site Anthropic gateway with a `finally` cost ledger, frozen SHA-pinned system prompt, context assembly, native-citation offset mapping, SSE streaming, per-session throttles, a daily spend ceiling, and a keyless stub backend that still cites real spans |
+| **M6** Web shell | Workspace layout, document rail, drag-and-drop upload with client-side rejection, paste fallback, one-click demo seeding, delete-everything, three-state theming, and a design system whose contrast is computed rather than asserted |
 
-Not built yet: the entire frontend (M6+). The `web` container currently serves
-the default Next.js page — everything below is reachable via `curl`.
+Not built yet: the conversation UI and the evidence panel (M7), the Fit Board
+(M8) and the Gap Matrix (M9). The chat API works today — `make smoke-sse`
+streams a grounded, cited answer through `curl`.
 
 ### Retrieval quality, measured
 

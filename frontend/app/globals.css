@@ -78,8 +78,25 @@
   --color-weak: var(--weak);
   --color-gap: var(--gap);
 
-  /* Exactly one elevation level (docs/PLAN.md §7). */
-  --shadow-raised: 0 1px 2px 0 oklch(0% 0 0 / 0.06);
+}
+
+/* Exactly one elevation level (docs/PLAN.md §7) — and it must be declared
+   `inline`, unlike every token above.
+
+   Tailwind resolves shadow values at build time and bakes the literal into
+   `--tw-shadow`. In a plain `@theme` block, `shadow-raised` compiles to
+   `--tw-shadow: 0 1px 2px 0 #0000000f` and the dark override below becomes dead
+   code: dark mode silently keeps the light drop shadow. Confirmed by reading
+   the real build output, not assumed.
+
+   `@theme inline` emits `--tw-shadow: var(--elevation)` instead, which
+   re-resolves when the theme attribute flips. The colour tokens do NOT need
+   this — `--color-card: var(--card)` survives as an indirection, verified in
+   the same build (`.bg-card{background-color:var(--color-card)}`). Shadows are
+   the exception because Tailwind parses their value rather than passing it
+   through. */
+@theme inline {
+  --shadow-raised: var(--elevation);
 }
 
 /* ── Light ───────────────────────────────────────────────────────────────────
@@ -113,6 +130,7 @@
   --weak: oklch(52.28% 0.1411 41.46);            /* #aa471c  5.64:1 */
   --gap: oklch(44.45% 0.1803 25.27);             /* #a00016  8.16:1 */
 
+  --elevation: 0 1px 2px 0 oklch(0% 0 0 / 0.06);
   color-scheme: light;
 }
 
@@ -146,7 +164,7 @@
      `0 0 #0000`, not `none`: Tailwind composes box-shadow from a comma-separated
      list of variables, and `none` inside such a list is invalid CSS that
      silently kills the whole declaration. */
-  --shadow-raised: 0 0 #0000;
+  --elevation: 0 0 #0000;
 
   color-scheme: dark;
 }
@@ -175,7 +193,7 @@
     --partial: oklch(68.40% 0.1421 78.90);
     --weak: oklch(77.20% 0.1383 41.81);
     --gap: oklch(83.48% 0.0912 24.98);
-    --shadow-raised: 0 0 #0000;
+    --elevation: 0 0 #0000;
     color-scheme: dark;
   }
 }

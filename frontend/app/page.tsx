@@ -1,69 +1,124 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+/**
+ * The workspace.
+ *
+ * A Client Component from the root down, because the whole of this app's state
+ * lives behind an httpOnly cookie set by Django on a *different origin*. A
+ * Server Component cannot read it in any real deployment — and in local
+ * development it accidentally can, because `localhost:3000` and
+ * `localhost:8000` share a cookie jar, which is exactly the kind of accident
+ * that works until the first deploy.
+ *
+ * The centre pane is M6's honest placeholder: the shell, the rail, upload,
+ * demo seeding and deletion are real; the conversation is M7.
+ */
+
+import { MessageSquare } from "lucide-react";
+
+import { DocRail } from "@/components/DocRail";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { WorkspaceShell } from "@/components/WorkspaceShell";
+import { api } from "@/lib/api";
+import { useWorkspace } from "@/lib/useWorkspace";
+
+export default function Workspace() {
+  const {
+    workspace,
+    state,
+    failure,
+    reload,
+    setWorkspace,
+    addDocument,
+    replaceDocuments,
+    removeDocument,
+  } = useWorkspace();
+
+  if (state === "loading") {
+    return (
+      <div className="grid h-dvh place-items-center">
+        <p className="sr-only" role="status">
+          Loading your workspace.
+        </p>
+        <div
+          aria-hidden
+          className="h-1 w-40 animate-pulse rounded-pill bg-muted"
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
+      </div>
+    );
+  }
+
+  if (state === "error" || !workspace) {
+    return (
+      <div className="grid h-dvh place-items-center p-6">
+        <div className="max-w-sm text-center">
+          <h1 className="text-title font-semibold">{failure?.message}</h1>
+          {failure?.hint ? (
+            <p className="mt-2 text-body text-ink-2">{failure.hint}</p>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void reload()}
+            className="mt-4 rounded-control bg-accent-fill px-3 py-1.5 text-body text-white"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <WorkspaceShell
+      banner={
+        <header className="flex items-center justify-between gap-3 border-b border-hairline px-3 py-2">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="text-meta font-semibold">Career Intelligence</span>
+            {workspace.demo_mode ? (
+              /* Persistent, not dismissible. Free-text generation is stubbed,
+                 and a reviewer must never mistake a stub for model output —
+                 the alternative is them concluding the model is poor. */
+              <span className="truncate rounded-pill bg-muted px-2 py-0.5 text-micro text-ink">
+                Demo mode — no API key, so answers are assembled from retrieved
+                passages rather than generated. Citations are real.
+              </span>
+            ) : null}
+          </div>
+          <ThemeToggle />
+        </header>
+      }
+      rail={
+        <DocRail
+          documents={workspace.documents}
+          canSeedDemo={workspace.can_seed_demo}
+          onAdded={addDocument}
+          onSeeded={replaceDocuments}
+          onRemoved={removeDocument}
+          onDeletedEverything={async () => {
+            setWorkspace(await api.deleteEverything());
+          }}
+        />
+      }
+    >
+      <div className="grid h-full place-items-center p-8">
+        <div className="max-w-md text-center">
+          <MessageSquare
+            size={20}
+            className="mx-auto text-ink-2"
+            aria-hidden
+          />
+          <h1 className="mt-3 text-section font-semibold">
+            {workspace.documents.length === 0
+              ? "Add a résumé and a job description"
+              : "Ready to answer questions"}
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p className="mt-2 text-body text-ink-2">
+            {workspace.documents.length === 0
+              ? "Or load the demo corpus from the rail — a résumé and three postings, spread across the fit range."
+              : `${workspace.documents.length} documents indexed. The conversation lands in the next milestone; retrieval, citations and the evidence panel are already working over these documents via the API.`}
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      </div>
+    </WorkspaceShell>
   );
 }
