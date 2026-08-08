@@ -9,10 +9,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # CI never has an Anthropic key. Every gate below must pass without one —
-  # that is the same constraint a reviewer running this repo is under.
-  DJANGO_SETTINGS_MODULE: config.settings.test
+# Deliberately no workflow-level `env:`. DJANGO_SETTINGS_MODULE used to live
+# here, for the backend job's pytest — and leaked into every other job, where
+# `docker compose` interpolates it into the api container. The e2e stack was
+# therefore running *test* settings: DEBUG off, no wildcard ALLOWED_HOSTS, a
+# per-process SECRET_KEY. It tested a differently-configured application than
+# anyone runs, and failed with a DisallowedHost that pointed nowhere near the
+# cause. It is scoped to the job that needs it instead.
+#
+# CI never has an Anthropic key. Every gate below must pass without one — the
+# same constraint a reviewer running this repo is under.
 
 jobs:
   backend:
@@ -36,6 +42,7 @@ jobs:
       run:
         working-directory: backend
     env:
+      DJANGO_SETTINGS_MODULE: config.settings.test
       POSTGRES_HOST: localhost
       POSTGRES_PORT: "5432"
       # The image bakes the ONNX weights at /opt/models, but CI runs on the

@@ -8,21 +8,24 @@ clickable, character-exact citations into the source document.
 **Stack:** Django 5.2 + DRF · PostgreSQL 17 + pgvector · local ONNX embeddings ·
 Next.js 16 · Claude Opus 5.
 
-> ### 🚧 Build status — in progress
+> ### 🚧 Build status — the core loop is complete
 >
 > This README documents **what actually works today**, not the finished product.
-> Seven of fourteen planned milestones are complete: ingest, indexing,
-> retrieval, grounded streaming chat, and the web shell — documents, upload,
-> demo seeding and deletion. The conversation UI is next
-> — [What's built](#whats-built-today) is exact about the line.
+> Eight of fourteen planned milestones are done, which is the plan's own cut line
+> for a demoable product: upload documents, ask a question, watch retrieval
+> happen, read a grounded answer, click a citation, see the exact source span
+> highlighted. What is *not* built is the differentiation on top — the scored Fit
+> Board, the Gap Matrix, interview prep. [What's built](#whats-built-today) is
+> exact about the line.
 >
 > One thing to know before reading further: the plan required a 30-minute spike
 > against the real API to confirm the citation response shape before writing any
 > streaming code. **No API key was available, so that spike never ran** — see
 > [The one unverified assumption](#the-one-unverified-assumption).
 >
-> The full design — including every decision below and the ones not yet
-> implemented — is in **[docs/PLAN.md](docs/PLAN.md)**.
+> The full design is in **[docs/PLAN.md](docs/PLAN.md)**; decisions that
+> contradict it are recorded in **[docs/adr/](docs/adr/)** rather than quietly
+> diverged from.
 
 ---
 
@@ -43,9 +46,12 @@ starts three containers and applies migrations. First build takes a few minutes
 about 30 seconds.
 
 ```
-web  →  http://localhost:3000     (Next.js scaffold — no UI yet, see build status)
+web  →  http://localhost:3000     the workspace
 api  →  http://localhost:8000/readyz
 ```
+
+Open the web app and click **Load demo data** — a résumé and three job postings,
+deliberately spread across the fit range. Then ask it something.
 
 ### An API key is optional
 
@@ -71,6 +77,9 @@ server-side `fallbacks` refusal path. Set it in `.env` and restart.
 | `make up` | Build, start, migrate, print URLs |
 | `make test` | Backend suite — no network, no API key |
 | `make eval` | Retrieval evaluation against the golden set |
+| `make test-web` | Frontend lint, types, unit tests, build |
+| `make e2e` | Browser acceptance test: ask → citation → click → highlighted span |
+| `make seed` | Load the demo corpus from the CLI |
 | `make smoke-sse` | Stream one chat answer through `curl` — no key needed |
 | `make smoke-live` | One real API round-trip; verifies the citation offset contract (**needs a key**) |
 | `make lint` | ruff, ruff format, mypy |
@@ -96,10 +105,12 @@ Complete and tested:
 | **M4** Retrieval & evaluation | Hybrid dense + lexical retrieval with RRF, per-job quotas, section anchors, an evidence floor, deterministic scope resolution and intent routing, keyless requirement extraction, and a golden-set eval gating CI |
 | **M5** LLM & streaming chat | Single-call-site Anthropic gateway with a `finally` cost ledger, frozen SHA-pinned system prompt, context assembly, native-citation offset mapping, SSE streaming, per-session throttles, a daily spend ceiling, and a keyless stub backend that still cites real spans |
 | **M6** Web shell | Workspace layout, document rail, drag-and-drop upload with client-side rejection, paste fallback, one-click demo seeding, delete-everything, three-state theming, and a design system whose contrast is computed rather than asserted |
+| **M7** Conversation & evidence | Streaming conversation with source chips, an offset-tracking Markdown renderer that splices clickable citation marks, the evidence panel with exact span highlighting, scope pill and mode toggle, suggestion chips, the retrieval trace drawer, and a browser acceptance test for the whole chain |
 
-Not built yet: the conversation UI and the evidence panel (M7), the Fit Board
-(M8) and the Gap Matrix (M9). The chat API works today — `make smoke-sse`
-streams a grounded, cited answer through `curl`.
+Not built yet: the scored Fit Board (M8), the Gap Matrix (M9) and interview prep
+(M10). Requirement extraction and matching already run at ingest with no API key,
+so the data those three surfaces render is in the database today — what is
+missing is the scoring and the screens.
 
 ### Retrieval quality, measured
 
@@ -109,8 +120,8 @@ required** — every metric is deterministic.
 | arm | hit-rate@12 | MRR@12 |
 |---|---|---|
 | dense only | 1.000 | 0.337 |
-| lexical only | 0.833 | 0.640 |
-| **RRF fused** | **1.000** | **0.497** |
+| lexical only | 0.833 | 0.619 |
+| **RRF fused** | **1.000** | **0.549** |
 
 That table is the justification for hybrid retrieval, and it is why the lexical
 arm keeps its GIN index. Dense finds the right chunk every time but ranks it
@@ -118,10 +129,20 @@ poorly; lexical misses more often but ranks precisely when it hits. Fusion keeps
 dense's recall and most of lexical's precision.
 
 Scope resolution ("Job #2" → the right document) and out-of-scope refusal are
-both **1.000**. Gap analysis scores **F1 0.875** against hand labels versus
+both **1.000**. Gap analysis scores **F1 0.970** against hand labels versus
 **0.482** for a naive top-k baseline — the delta is the evidence for the claim
 that *vector search cannot retrieve absence*: the chunks most similar to "what
 am I missing?" are the ones describing what the candidate has.
+
+Those last two numbers moved late, and how is worth recording. Building the
+suggestion chips surfaced one reading *"Am I blocked by backend or platform?"* —
+the extractor's fallback takes the first three words of a bullet, and *"6+ years
+in backend or platform engineering"* spans a conjunction. The same defect
+produced `logistics or supply` and `quantisation or model`. Those are not
+skills: they match nothing in a résumé, so they are reported missing forever, and
+they were being rendered verbatim. Teaching the fallback to stop at a conjunction
+moved gap F1 from 0.875 to 0.970 and fused MRR from 0.497 to 0.549 — the junk
+names were hurting retrieval too, because skills feed query expansion.
 
 CI fails the build if fused hit-rate drops below 0.95 or routing below 1.000.
 The committed numbers live in `backend/evals/baseline.json`.
@@ -157,7 +178,49 @@ If it turns out `char_location` is unusable, the documented fallback is
 server-numbered `[S1]` markers with a regex mapper — about twenty lines, and
 visibly worse UX.
 
-### Try what exists
+### The citation chain
+
+The product's central claim is that every factual sentence is checkable, and the
+whole system is arranged around one contract:
+
+```
+normalized_text[chunk.char_start:chunk.char_end] == chunk.text
+```
+
+Because that holds, a citation is one addition. Anthropic returns
+`char_location` offsets relative to the content block it cited; adding the
+chunk's `char_start` puts them into the document's own coordinate space. No
+searching, no fuzzy matching, no model-written `[1]` indices to be off by one.
+
+Then it is checked, twice. The server verifies
+`normalized_text[start:end] == cited_text` before persisting a citation and
+**drops** any that disagrees — a mark on the wrong span is worse than a missing
+one, because it looks like evidence. The evidence panel re-checks the same
+equality before highlighting.
+
+Three things had to be got right for that to survive contact with a browser, and
+each was a real bug first:
+
+- **Splicing marks into rendered Markdown.** Offsets index the *raw* answer.
+  Splicing a sentinel into the source re-partitions a `**` delimiter run and
+  destroys the emphasis it was inserted into; walking the rendered DOM cannot use
+  raw offsets at all, since every `**` shifts everything after it by four. The
+  renderer is hand-written so offsets reach the leaf spans, which also makes
+  "HTML disabled" structural rather than a plugin setting — there is no code path
+  that turns a string into markup.
+- **Marks that landed on syntax vanished.** An offset inside `**`, on a list
+  marker, or at position 0 belongs to no text span, so the mark silently never
+  rendered. Offsets now snap forward to the next real text.
+- **Python counts code points; JavaScript counts UTF-16 units.** One emoji in the
+  question is enough to drift every citation. Measured: an 803-code-point answer
+  is 806 units, and all three citations landed three units early — with no error,
+  and pointing at a plausible-looking wrong passage.
+
+`make e2e` asserts the whole chain in a real browser: ask a question, wait for a
+citation, click it, and check the `<mark>` contains the cited text and is scrolled
+into view. It is the one claim no unit test can make.
+
+### Try it from the API
 
 ```bash
 # Create a session, upload a résumé and a job description
@@ -207,13 +270,15 @@ each passage was chosen and what the message cost.
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/v1/sessions/` | Create (or return) an anonymous workspace |
-| `GET` `DELETE` | `/api/v1/sessions/current/` | Hydrate / hard-delete everything |
+| `GET` `DELETE` | `/api/v1/sessions/current/` | Hydrate the whole workspace in one call / hard-delete everything |
+| `POST` | `/api/v1/sessions/demo/` | Load the demo corpus through the real ingest pipeline |
 | `GET` `POST` | `/api/v1/documents/` | List / upload |
 | `POST` | `/api/v1/documents/paste/` | Paste text — the fallback every parse error points at |
 | `GET` `PATCH` `DELETE` | `/api/v1/documents/{id}/` | Detail (incl. `normalized_text`) / rename / delete |
 | `POST` | `/api/v1/chat/` | **SSE.** Ask a question; streams status, scope, sources, deltas, citations, done |
 | `GET` | `/api/v1/chat/messages/` | Conversation history with citations, for a page reload |
 | `GET` | `/api/v1/traces/{message_id}/` | Full retrieval trace + the LLM calls that message made |
+| `GET` | `/api/v1/suggestions/` | Four question chips templated from extracted requirements — **zero LLM calls** |
 | `GET` | `/api/v1/usage/` | Session totals, daily spend against the ceiling, last 20 calls |
 | `GET` | `/healthz` `/readyz` `/version` | Liveness / readiness / build identity |
 
@@ -223,17 +288,19 @@ each passage was chosen and what the message cost.
 
 ```
 ┌──────────────────────── browser ────────────────────────┐
-│  Next.js 16  ·  workspace  ·  gap matrix          (M6+) │
+│  Next.js 16  ·  document rail · conversation · evidence │
 └───────┬─────────────────────────────────┬───────────────┘
-        │ fetch(credentials:'include')    │ SSE            (M5)
+        │ fetch(credentials:'include')    │ SSE
         ▼                                 ▼
 ┌────────────────── api (gunicorn, gthread) ──────────────────┐
 │ core/       session cookie · request-id · structlog · errors │
 │ documents/  validate → parse → normalize → scan → section    │
 │             → chunk → embed                                  │
 │ rag/        embeddings (local ONNX)                          │
-│             dense · lexical · RRF · quota · anchors    (M4)  │
-│ llm/        AnthropicGateway — the ONLY call site      (M5)  │
+│             dense · lexical · RRF · quota · anchors           │
+│ analysis/   requirement extraction · matching · suggestions   │
+│ chat/       SSE · context assembly · citation offset mapping  │
+│ llm/        AnthropicGateway — the ONLY call site             │
 └───────┬──────────────────────────────────────┬──────────────┘
         │ SQL (rows + vectors + tsvector)      │ HTTPS  (M5)
         ▼                                      ▼
@@ -256,8 +323,8 @@ validate → parse → normalize → scan → sections → chunk → embed → i
 ```
 
 Everything downstream of `normalize` indexes into a single canonical string,
-`Document.normalized_text`. Sections, chunks and (in M5) the model's own citation
-offsets are all character positions in that one string. The invariant
+`Document.normalized_text`. Sections, chunks and the model's own citation offsets
+are all character positions in that one string. The invariant
 
 ```
 normalized_text[chunk.char_start:chunk.char_end] == chunk.text
@@ -272,11 +339,13 @@ highlight the wrong span and nothing raises an error.
 ## Engineering standards
 
 **Followed.** Typed protocols at every swap seam (embedder, requirement
-extractor, task runner). `mypy --strict` on the packages that carry logic.
+extractor, LLM backend). `mypy --strict` on the packages that carry logic.
 Structured JSON logs with PII redaction on by default. One canonical text
-representation. Containerised, one command to run. CI on every push: ruff, mypy,
-tests against a real pgvector service, frontend lint/typecheck/build, a full
-compose build, and secret scanning over complete git history.
+representation. Containerised, one command to run. Every new dependency gated by
+an ADR in [docs/adr/](docs/adr/), including the ones declined. CI on every push:
+ruff, mypy, backend tests against a real pgvector service, the retrieval eval as
+a build gate, frontend lint/typecheck/tests/build, a full compose build, browser
+acceptance tests, and secret scanning over complete git history.
 
 **Deliberately skipped**, each with the trigger that would change my mind:
 
@@ -291,40 +360,65 @@ compose build, and secret scanning over complete git history.
 
 ### Testing
 
-**218 tests**, no network and no API key required.
+**351 backend + 96 frontend + 4 browser tests.** None need a network or an API
+key, which is the same constraint a reviewer runs under.
 
 | Area | Tests |
 |---|---|
+| Retrieval: fusion, quotas, anchors, floor, routing | 47 |
+| Chat: SSE contract, refusals, persistence, throttles | 30 |
 | Injection scanning | 28 |
-| Document API (incl. cross-tenant probes) | 27 |
-| Retrieval: fusion, quotas, anchors, floor, routing | 40 |
+| Document API (incl. cross-tenant probes) | 28 |
 | Chunking, offsets, tokenizer | 24 |
 | Section detection | 21 |
-| Requirement extraction & matching | 15 |
+| Suggestion chips & skill extraction | 20 |
+| Anthropic gateway: request shape, ledger, refusals | 15 |
 | Parsers & upload validation | 15 |
-| Sessions | 11 |
+| Demo seeding & workspace hydration | 15 |
+| Context assembly & history trimming | 13 |
+| Pricing, budget ceiling, backend selection | 12 |
+| Citation offset mapping | 10 |
 | Normalization (property-based) | 10 |
-| Logging, redaction, tenancy, health | 20 |
+| Robustness: races, size caps, malformed bodies | 7 |
+| Everything else (sessions, health, logging, CORS, prompt SHA) | 56 |
 
-Roughly 3,600 lines of application code against 1,700 lines of tests. Three
-properties are treated as non-negotiable: the chunk-offset invariant, the tenancy
-guard (session A must not reach session B's data, and a foreign UUID must 404
-identically to a missing one), and "CI cannot spend money" — the test settings
+Frontend: the SSE parser under adversarial chunking (21), the offset-tracking
+Markdown renderer (36), the API client, upload rejection, and component tests for
+the pieces with real accessibility depth.
+
+Roughly 8,600 lines of backend against 4,400 of backend tests; 3,700 lines of
+frontend against 1,000 of frontend tests.
+
+Four properties are treated as non-negotiable: the chunk-offset invariant, the
+tenancy guard (session A must not reach session B's data, and a foreign UUID must
+404 identically to a missing one), "CI cannot spend money" — the test settings
 pin the LLM backend to a fake, and that assertion caught a real misconfiguration
-on its first run.
+on its first run — and the citation chain end to end, which is the one thing only
+a browser can check.
 
 The embedder is **not** mocked. fastembed on CPU is deterministic, so tests
 exercise the true encoding path; mocking it would mean the retrieval tests assert
 nothing.
 
+Several tests exist because a gate turned out to be unable to fail. The
+concurrency test removes its own lock to confirm it reproduces the race. The
+secret scanner is invoked directly after the official action reported "no leaks
+found" having scanned zero bytes. The naive gap baseline was rewritten after it
+scored a perfect 1.000 by intersecting its prediction with the expected answer.
+And the browser job ran against a *differently configured* application for two
+attempts, because a workflow-level `DJANGO_SETTINGS_MODULE` meant for pytest
+leaked into `docker compose` — it is scoped to the job that needs it now.
+
 ---
 
 ## Key technical decisions
 
-> **Note to the reviewer:** the sections below record decisions made during the
-> build. They are being expanded into fuller reasoning as the remaining
-> milestones land — see [docs/PLAN.md](docs/PLAN.md) §2 and §4 for the complete
-> argument behind each, including the alternatives considered.
+> **Note to the reviewer:** the sections below summarise decisions made during
+> the build. Where a decision *contradicts* the plan it lives in
+> [docs/adr/](docs/adr/) with the measurement that overturned it — the themed
+> status palette, the vendored fonts, the streaming-answer accessibility
+> design, and the frontend dependency budget including what was declined.
+> [docs/PLAN.md](docs/PLAN.md) §2 and §4 carry the full argument for the rest.
 
 **Local embeddings, not a hosted embedder.** Anthropic has no embeddings
 endpoint, so any hosted embedder means a *second* vendor key. A reviewer who
@@ -357,6 +451,19 @@ Backend Engineer, Meridian Logistics]` costs zero tokens. I'm deliberately *not*
 claiming the published 35–49% improvement figure — that's for the generated
 variant, and M4's evaluation will measure what this actually buys.
 
+**The status palette is themed, against my own plan.** §7 fixed four hexes and
+called them "never themed", with the caveat that two fall under 3:1 on the light
+surface — mitigated, it said, because every instance ships an icon and a text
+label. Computed, amber is **1.79:1**, under *two*; and the mitigation is circular,
+because an icon is itself a graphical object needing 3:1, so drawing it in the
+failing colour rescues nothing. Three un-themed palettes were computed and each
+fixed one axis while breaking the other: an un-themed colour has to clear 3:1
+against both a near-white page and a near-black card, which confines it to a 1.9x
+luminance range, and four hues in that range cannot also be far apart in
+luminance — the one channel a colour-blind reader still has. Theming resolves it
+at 3.47:1 worst case, with equal or better colour-blind separation.
+[ADR-0011](docs/adr/0011-themed-status-palette.md) has the working.
+
 **Prompt injection is treated as a real threat.** The adversary is the job
 posting, not the user. Defence is structural first: document content only ever
 enters as `document` content blocks in a user turn, never concatenated into an
@@ -372,9 +479,6 @@ than papered over.
 
 ## What I'd do differently / next
 
-Immediate: the LLM gateway with a single call site and a cost ledger, then
-streaming chat with native citations, then the frontend.
-
 **The golden set is the weakest part of the evaluation** and I would replace it
 first. Thirty-two questions drafted alongside the implementation measure
 *regression*, not quality — they are not adversarial, and they were written by
@@ -382,12 +486,29 @@ someone who knew how the retriever worked. Independently authored questions,
 including negations and deliberately ambiguous references, would be worth more
 than any amount of further tuning.
 
-The image is currently **2.2 GB** (onnxruntime plus baked weights). That's a real
-cost to a reviewer's first `make up` and I haven't attacked it yet.
+**The deterministic extractor's skill naming has a known ceiling**, and it is
+written into the code rather than left to be discovered. Longest-match names
+*"Solid PostgreSQL, including schema design and query tuning"* as `schema
+design`, because that phrase is three characters longer than `postgresql`.
+Ranking by earliest position instead fixes that case and breaks two worse ones —
+*"Strong Python, with production PyTorch experience"* resolves to `python`, which
+the résumé has, so a real gap disappears. Measured, position-first moved gap
+recall from 1.000 to 0.867, so it was reverted. The distinction is specificity
+rather than position or length, and nothing in a flat vocabulary encodes it; the
+LLM extractor behind the same protocol is where that gets fixed.
+
+**The image is 2.2 GB** (onnxruntime plus baked weights). That's a real cost to a
+reviewer's first `make up` and I haven't attacked it.
+
+**No screen reader has run against this.** The streaming-answer accessibility
+design ([ADR-0012](docs/adr/0012-streaming-answers-are-not-live-regions.md)) is
+built on measurement — delta counts, splice distances — plus vendor support data
+and specification text. The contrast maths is computed and reproducible, but the
+plan's own axe-core gate has not been wired up.
 
 Page-level citation offsets were dropped: mapping them honestly requires
-normalizing per page, and nothing consumes them today. A nullable column nobody
-fills is worse than no column.
+normalizing per page, and nothing consumes them. A nullable column nobody fills
+is worse than no column.
 
 ---
 
@@ -431,16 +552,26 @@ bolting on a policy afterwards.
 
 ```
 ├── docs/
-│   ├── PLAN.md          the full design and build plan — start here
-│   └── ASSIGNMENT.md    the original brief
+│   ├── PLAN.md              the full design and build plan — start here
+│   ├── ASSIGNMENT.md        the original brief
+│   └── adr/                 decisions that contradict the plan, with the maths
 ├── backend/
-│   ├── apps/core/       session tenancy, logging, errors, health
-│   ├── apps/documents/  parsers, normalize, sanitize, chunking, ingest
-│   ├── apps/rag/        embeddings (retrieval lands in M4)
-│   ├── fixtures/        synthetic demo corpus + adversarial fixture
-│   ├── scripts/         fixture generation (committed, so the PDFs are auditable)
-│   └── tests/           unit + api
-├── frontend/            Next.js scaffold (UI lands in M6+)
+│   ├── apps/core/           session tenancy, logging, errors, health
+│   ├── apps/documents/      parsers, normalize, sanitize, chunking, ingest, demo
+│   ├── apps/rag/            embeddings, dense/lexical/RRF, routing, eval harness
+│   ├── apps/analysis/       requirement extraction, matching, suggestion chips
+│   ├── apps/chat/           SSE, prompts, context assembly, citation mapping
+│   ├── apps/observability/  the LLM call ledger
+│   ├── llm/                 gateway, pricing, budget, the keyless fake
+│   ├── evals/               golden set + committed baseline
+│   ├── fixtures/            synthetic demo corpus + adversarial fixture
+│   ├── scripts/             fixture generation, make smoke-live
+│   └── tests/               unit + api
+├── frontend/
+│   ├── app/                 routes, design tokens, vendored fonts
+│   ├── components/          shell, rail, conversation, evidence panel
+│   ├── lib/                 SSE parser, chat reducer, markdown+offsets, API
+│   └── e2e/                 the browser acceptance test
 ├── docker-compose.yml
 └── Makefile
 ```
