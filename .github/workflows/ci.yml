@@ -147,27 +147,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      # Everything the browser touches is on localhost here, so the app's
-      # derived API base resolves without the host.docker.internal indirection
-      # the local Playwright container needs.
       - name: generate .env
         run: make .env
       - name: start the stack
         run: docker compose up -d --build api web
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: frontend/package.json
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-      - name: install
-        working-directory: frontend
-        run: pnpm install --frozen-lockfile
-      - name: install chromium
-        working-directory: frontend
-        run: pnpm exec playwright install --with-deps chromium
+
+      # readyz requires the `vector` extension, which the initial migration
+      # creates. Without this the API answers 503 forever and the wait below
+      # burns its whole budget on a stack that was never going to come up.
+      - name: migrate
+        run: docker compose exec -T api python manage.py migrate --noinput
+
       - name: wait for the stack
         run: |
           for i in $(seq 1 60); do
@@ -175,14 +165,23 @@ jobs:
               && curl -fsS http://localhost:3000/ >/dev/null 2>&1 && exit 0
             sleep 2
           done
-          docker compose logs --tail=50
+          docker compose logs --tail=60
           exit 1
-      # The claim this project rests on — a citation you can click that
-      # highlights the exact source span — is the one thing no unit test can
-      # check. It runs against the real stack, not a mocked API.
+
+      # Run in the same container `make e2e` uses, rather than on the runner.
+      #
+      # The first version installed the frontend's dependencies on the runner so
+      # Playwright could run there — into `frontend/`, which is bind-mounted into
+      # the web container. Next noticed and said so exactly: "Could not find the
+      # Next.js package … node_modules is being reorganized by a concurrent
+      # install". Running in the container means the runner never touches that
+      # directory, and CI exercises the identical path a developer does.
       - name: acceptance
-        working-directory: frontend
-        run: pnpm exec playwright test
+        run: docker compose run --rm e2e
+
+      - name: diagnose
+        if: failure()
+        run: docker compose logs --tail=100
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
