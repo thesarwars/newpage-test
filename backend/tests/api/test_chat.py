@@ -19,6 +19,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from apps.chat.models import Citation, Message, MessageStatus, RetrievalTrace
+from apps.chat.throttles import ChatBurstThrottle, ChatSustainedThrottle
 from apps.core.models import Session
 from apps.documents.ingest import ingest_text
 from apps.documents.models import Document, DocumentKind
@@ -476,3 +477,108 @@ def test_session_totals_track_the_ledger(session: Session) -> None:
     session.refresh_from_db()
     assert session.tokens_used == 1500
     assert session.cost_usd == Decimal("0.017500")
+
+
+@pytest.mark.django_db
+class TestThrottling:
+    """The throttle is wired to the view, and keyed by session rather than IP.
+
+    Rates are set on the throttle class, not through `settings.REST_FRAMEWORK`.
+    DRF binds `SimpleRateThrottle.THROTTLE_RATES` at class-definition time, so a
+    settings override does not reach it — an earlier version of these tests
+    "passed" while the configured rate was never in effect, which is the failure
+    mode a throttle test exists to rule out. `__init__` short-circuits `get_rate`
+    when a `rate` attribute is present, so this is the honest lever.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_cache(self) -> Any:
+        from django.core.cache import cache
+
+        cache.clear()
+        yield
+        cache.clear()
+
+    def _limit(self, monkeypatch: pytest.MonkeyPatch, rate: str) -> None:
+        for throttle in (ChatBurstThrottle, ChatSustainedThrottle):
+            monkeypatch.setattr(throttle, "rate", rate, raising=False)
+
+    def test_the_limit_is_actually_enforced(
+        self,
+        session_client: APIClient,
+        corpus: tuple[Document, Document],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self._limit(monkeypatch, "2/min")
+
+        codes = [
+            session_client.post(
+                "/api/v1/chat/", {"message": "Am I a good fit?"}, format="json"
+            ).status_code
+            for _ in range(3)
+        ]
+
+        assert codes == [200, 200, 429]
+
+    def test_a_generous_limit_does_not_throttle(
+        self,
+        session_client: APIClient,
+        corpus: tuple[Document, Document],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The control. Without it the test above passes if everything 429s."""
+        self._limit(monkeypatch, "100/min")
+
+        codes = [
+            session_client.post(
+                "/api/v1/chat/", {"message": "Am I a good fit?"}, format="json"
+            ).status_code
+            for _ in range(3)
+        ]
+
+        assert codes == [200, 200, 200]
+
+    def test_the_rejection_uses_the_project_error_envelope(
+        self,
+        session_client: APIClient,
+        corpus: tuple[Document, Document],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A client should only ever have to parse one error shape."""
+        self._limit(monkeypatch, "1/min")
+        session_client.post("/api/v1/chat/", {"message": "Am I a good fit?"}, format="json")
+
+        blocked = session_client.post(
+            "/api/v1/chat/", {"message": "Am I a good fit?"}, format="json"
+        )
+
+        assert blocked.status_code == 429
+        assert blocked.data["error_code"] == "rate_limited"
+        assert blocked.data["retry_after"] > 0
+
+    def test_the_key_is_the_session_not_the_ip(
+        self,
+        client: APIClient,
+        session_client: APIClient,
+        other_session: Session,
+        corpus: tuple[Document, Document],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Two tenants share one IP in every office. They must not share a bucket."""
+        from tests.conftest import authenticate
+
+        self._limit(monkeypatch, "1/min")
+
+        session_client.post("/api/v1/chat/", {"message": "Am I a good fit?"}, format="json")
+        assert (
+            session_client.post(
+                "/api/v1/chat/", {"message": "Am I a good fit?"}, format="json"
+            ).status_code
+            == 429
+        )
+
+        other = authenticate(client, other_session)
+        assert (
+            other.post("/api/v1/chat/", {"message": "Am I a good fit?"}, format="json").status_code
+            == 200
+        )
