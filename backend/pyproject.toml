@@ -27,6 +27,10 @@ dependencies = [
     # Imported directly by chunking/tokenizer.py. Arrives transitively via
     # fastembed, but a module that imports it should declare it.
     "tokenizers>=0.21",
+    # The only outbound network dependency at request time. Imported lazily
+    # inside llm/gateway.py so that the keyless path — which is the path CI and
+    # a reviewer without a key take — never touches it.
+    "anthropic>=0.75",
 ]
 
 [dependency-groups]

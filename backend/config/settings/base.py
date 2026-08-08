@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "apps.documents",
     "apps.rag",
     "apps.analysis",
+    "apps.observability",
 ]
 
 MIDDLEWARE = [
@@ -119,6 +120,10 @@ ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
 CIA_CHAT_MODEL = env("CIA_CHAT_MODEL", default="claude-opus-5")
 LLM_BACKEND = env("LLM_BACKEND", default="auto")  # auto | anthropic | fake
 LLM_DAILY_COST_CEILING_USD = env("LLM_DAILY_COST_CEILING_USD")
+# Artificial per-token delay for the keyless stub, so a demo answer streams
+# visibly instead of arriving whole. Zero in tests — the suite should not spend
+# wall-clock proving that `time.sleep` sleeps.
+LLM_FAKE_DELAY_S = env.float("LLM_FAKE_DELAY_S", default=0.012)
 EMBEDDING_BACKEND = env("EMBEDDING_BACKEND", default="local")
 EMBEDDING_MODEL = env("EMBEDDING_MODEL", default="BAAI/bge-small-en-v1.5")
 # Where the ONNX weights are baked at image build time (backend/Dockerfile).

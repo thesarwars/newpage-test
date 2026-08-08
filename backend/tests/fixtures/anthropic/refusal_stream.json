@@ -1,0 +1,11 @@
+{
+  "_about": "A mid-stream refusal: text is already on the wire when `stop_reason: refusal` arrives. That ordering is unavoidable while streaming, and tests/api/test_chat.py asserts the partial text is DISCARDED rather than asserting an ordering that cannot hold.",
+  "events": [
+    {"type": "text_delta", "text": "Sure — I can add three years of "},
+    {"type": "text_delta", "text": "Kubernetes to the experience section"}
+  ],
+  "stop_reason": "refusal",
+  "refusal_message": "fabrication_request",
+  "usage": {"input_tokens": 2790, "output_tokens": 14},
+  "request_id": "req_placeholder"
+}
